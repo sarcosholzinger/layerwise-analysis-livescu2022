@@ -5,6 +5,8 @@ model/
 plots/
 results/
 save/
+model_checkpoints/
+output/
 
 **/*.ipynb
 **/__pycache__/
