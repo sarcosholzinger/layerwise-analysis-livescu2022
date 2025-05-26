@@ -29,6 +29,23 @@ layerwise-analysis/
     └── visualizations/  # Analysis plots
 ```
 
+### Feature Files
+The analysis uses the following feature files from the LibriSpeech dev-clean dataset:
+```
+/home/sarcosh1/repos/layerwise-analysis/output/hubert/librispeech_dev-clean_sample1/
+├── 3752-4944-0000_features.npz
+├── 3752-4944-0001_features.npz
+├── 3752-4944-0002_features.npz
+├── 3752-4944-0003_features.npz
+├── 3752-4944-0004_features.npz
+└── 3752-4944-0005_features.npz
+```
+
+Each .npz file contains features extracted from a different audio file, with the following structure:
+- File naming format: `[speaker_id]-[book_id]-[utterance_id]_features.npz`
+- Each file contains features from all layers of the HuBERT model
+- Features are stored as numpy arrays with dimensions [time_steps, feature_dim]
+
 ### Running Feature Extraction
 
 1. The feature extraction script (`extract_features.py`) extracts frame-level features from all layers of the HuBERT model.
