@@ -11,6 +11,7 @@ from sklearn.cross_decomposition import CCA
 from tqdm import tqdm
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import PillowWriter
+from sklearn.linear_model import LinearRegression
 
 def pad_features(features, max_length):
     """Pad features to a consistent length."""
@@ -997,6 +998,423 @@ def plot_padding_ratios(layer_features, original_lengths, output_dir, model_name
     
     return aggregate_padding_ratios, per_file_padding_ratios
 
+# New functions for partial correlation and kernel analysis
+def compute_partial_correlation(X, Y, Z):
+    """
+    Compute partial correlation between X and Y given Z.
+    
+    Partial correlation r_{XY|Z} = correlation between X and Y after removing 
+    the linear effect of Z from both X and Y.
+    
+    Args:
+        X: (n_samples, n_features_X)
+        Y: (n_samples, n_features_Y)
+        Z: (n_samples, n_features_Z) - conditioning variable (CNN output)
+    
+    Returns:
+        Partial correlation coefficient
+    """
+    # Ensure 2D arrays
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+    if len(Y.shape) == 1:
+        Y = Y.reshape(-1, 1)
+    if len(Z.shape) == 1:
+        Z = Z.reshape(-1, 1)
+    
+    # Regress out Z from X
+    reg_X = LinearRegression()
+    reg_X.fit(Z, X)
+    residuals_X = X - reg_X.predict(Z)
+    
+    # Regress out Z from Y
+    reg_Y = LinearRegression()
+    reg_Y.fit(Z, Y)
+    residuals_Y = Y - reg_Y.predict(Z)
+    
+    # Compute correlation between residuals
+    # Flatten residuals for correlation computation
+    residuals_X_flat = residuals_X.flatten()
+    residuals_Y_flat = residuals_Y.flatten()
+    
+    if len(residuals_X_flat) > 1 and len(residuals_Y_flat) > 1:
+        partial_corr = np.corrcoef(residuals_X_flat, residuals_Y_flat)[0, 1]
+    else:
+        partial_corr = 0.0
+    
+    return partial_corr
+
+def compute_conditional_cka(X, Y, Z, method='residual'):
+    """
+    Compute CKA between X and Y conditioned on Z (CNN output).
+    
+    Two methods available:
+    1. 'residual': Compute CKA on residuals after regressing out Z
+    2. 'partial': Compute partial CKA using kernel matrices
+    
+    Args:
+        X: (n_samples, n_features_X)
+        Y: (n_samples, n_features_Y)
+        Z: (n_samples, n_features_Z) - CNN output features
+        method: 'residual' or 'partial'
+    
+    Returns:
+        Conditional CKA score
+    """
+    if method == 'residual':
+        # Method 1: Regress out Z from both X and Y, then compute CKA on residuals
+        
+        # Regress out Z from X
+        reg_X = LinearRegression()
+        reg_X.fit(Z, X)
+        X_residual = X - reg_X.predict(Z)
+        
+        # Regress out Z from Y
+        reg_Y = LinearRegression()
+        reg_Y.fit(Z, Y)
+        Y_residual = Y - reg_Y.predict(Z)
+        
+        # Compute CKA on residuals
+        return compute_cka(X_residual, Y_residual)
+    
+    elif method == 'partial':
+        # Method 2: Partial CKA using kernel regression
+        
+        # Center all matrices
+        X_c = X - X.mean(axis=0, keepdims=True)
+        Y_c = Y - Y.mean(axis=0, keepdims=True)
+        Z_c = Z - Z.mean(axis=0, keepdims=True)
+        
+        # Compute Gram matrices
+        K_X = X_c @ X_c.T
+        K_Y = Y_c @ Y_c.T
+        K_Z = Z_c @ Z_c.T
+        
+        # Center Gram matrices
+        n = K_X.shape[0]
+        H = np.eye(n) - np.ones((n, n)) / n
+        K_X_centered = H @ K_X @ H
+        K_Y_centered = H @ K_Y @ H
+        K_Z_centered = H @ K_Z @ H
+        
+        # Compute partial kernel matrices (remove effect of Z)
+        # Using the formula: K_{X|Z} = K_X - K_{XZ} K_Z^{-1} K_{ZX}
+        # We use regularized inverse for numerical stability
+        epsilon = 1e-5
+        K_Z_inv = np.linalg.inv(K_Z_centered + epsilon * np.eye(n))
+        
+        K_X_partial = K_X_centered - K_X_centered @ K_Z_inv @ K_Z_centered
+        K_Y_partial = K_Y_centered - K_Y_centered @ K_Z_inv @ K_Z_centered
+        
+        # Compute CKA on partial kernels
+        hsic_XY = np.trace(K_X_partial @ K_Y_partial) / (n - 1)**2
+        hsic_XX = np.trace(K_X_partial @ K_X_partial) / (n - 1)**2
+        hsic_YY = np.trace(K_Y_partial @ K_Y_partial) / (n - 1)**2
+        
+        # Compute conditional CKA
+        conditional_cka = hsic_XY / np.sqrt(hsic_XX * hsic_YY + 1e-8)
+        
+        return conditional_cka
+    
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+def plot_conditional_layer_similarity(layer_features, original_lengths, output_dir, model_name, num_files):
+    """
+    Plot similarity matrices conditioned on CNN output (transformer_input).
+    """
+    # Get CNN output layer
+    cnn_output_layer = 'transformer_input'
+    if cnn_output_layer not in layer_features:
+        print(f"Warning: {cnn_output_layer} not found in features. Using first layer as reference.")
+        cnn_output_layer = sorted(layer_features.keys())[0]
+    
+    # Get CNN output features
+    cnn_features = layer_features[cnn_output_layer]
+    
+    # Filter and sort layers (excluding CNN output itself)
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer != cnn_output_layer and
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    n_layers = len(layers)
+    
+    # Initialize matrices
+    conditional_correlation_matrix = np.zeros((n_layers, n_layers))
+    conditional_cka_residual_matrix = np.zeros((n_layers, n_layers))
+    conditional_cka_partial_matrix = np.zeros((n_layers, n_layers))
+    
+    # Also compute unconditional for comparison
+    unconditional_correlation_matrix = np.zeros((n_layers, n_layers))
+    unconditional_cka_matrix = np.zeros((n_layers, n_layers))
+    
+    print(f"Computing conditional similarities with CNN output ({cnn_output_layer}) as conditioning variable...")
+    
+    # Create progress bar for layer pairs
+    total_pairs = n_layers * n_layers
+    with tqdm(total=total_pairs, desc="Computing layer similarities") as pbar:
+        for i, layer1 in enumerate(layers):
+            for j, layer2 in enumerate(layers):
+                pbar.set_description(f"Processing {layer1} vs {layer2}")
+                
+                features1 = layer_features[layer1]
+                features2 = layer_features[layer2]
+                
+                # Ensure same batch size
+                min_batch = min(features1.shape[0], features2.shape[0], cnn_features.shape[0])
+                features1 = features1[:min_batch]
+                features2 = features2[:min_batch]
+                cnn_features_batch = cnn_features[:min_batch]
+                
+                # Handle padding if original lengths are available
+                if layer1 in original_lengths and layer2 in original_lengths and cnn_output_layer in original_lengths:
+                    # Use padding-aware approach
+                    all_X = []
+                    all_Y = []
+                    all_Z = []
+                    
+                    for b in range(min_batch):
+                        # Get valid lengths
+                        valid_len = min(
+                            original_lengths[layer1][b] if b < len(original_lengths[layer1]) else features1.shape[1],
+                            original_lengths[layer2][b] if b < len(original_lengths[layer2]) else features2.shape[1],
+                            original_lengths[cnn_output_layer][b] if b < len(original_lengths[cnn_output_layer]) else cnn_features.shape[1]
+                        )
+                        
+                        if valid_len > 0:
+                            all_X.append(features1[b, :valid_len, :])
+                            all_Y.append(features2[b, :valid_len, :])
+                            all_Z.append(cnn_features_batch[b, :valid_len, :])
+                    
+                    # Stack all valid samples
+                    if all_X and all_Y and all_Z:
+                        X = np.vstack(all_X)
+                        Y = np.vstack(all_Y)
+                        Z = np.vstack(all_Z)
+                    else:
+                        pbar.update(1)
+                        continue
+                else:
+                    # Reshape to 2D
+                    X = features1.reshape(features1.shape[0] * features1.shape[1], -1)
+                    Y = features2.reshape(features2.shape[0] * features2.shape[1], -1)
+                    Z = cnn_features_batch.reshape(cnn_features_batch.shape[0] * cnn_features_batch.shape[1], -1)
+                
+                # Ensure same number of samples
+                min_samples = min(X.shape[0], Y.shape[0], Z.shape[0])
+                if min_samples < 2:
+                    pbar.update(1)
+                    continue
+                    
+                X = X[:min_samples]
+                Y = Y[:min_samples]
+                Z = Z[:min_samples]
+                
+                # Compute unconditional metrics for comparison
+                try:
+                    unconditional_correlation_matrix[i, j] = np.corrcoef(X.flatten(), Y.flatten())[0, 1]
+                    unconditional_cka_matrix[i, j] = compute_cka(X, Y)
+                except:
+                    unconditional_correlation_matrix[i, j] = 0.0
+                    unconditional_cka_matrix[i, j] = 0.0
+                
+                # Compute conditional metrics
+                try:
+                    # Partial correlation
+                    conditional_correlation_matrix[i, j] = compute_partial_correlation(X, Y, Z)
+                    
+                    # Conditional CKA (residual method)
+                    conditional_cka_residual_matrix[i, j] = compute_conditional_cka(X, Y, Z, method='residual')
+                    
+                    # Conditional CKA (partial method)
+                    conditional_cka_partial_matrix[i, j] = compute_conditional_cka(X, Y, Z, method='partial')
+                    
+                except Exception as e:
+                    print(f"\nWarning: Failed to compute conditional metrics for {layer1}-{layer2}: {e}")
+                    conditional_correlation_matrix[i, j] = 0.0
+                    conditional_cka_residual_matrix[i, j] = 0.0
+                    conditional_cka_partial_matrix[i, j] = 0.0
+                
+                pbar.update(1)
+    
+    print("\nGenerating visualizations...")
+    
+    # Create visualization comparing conditional vs unconditional
+    fig, axes = plt.subplots(2, 3, figsize=(24, 16))
+    
+    # Row 1: Unconditional metrics
+    sns.heatmap(unconditional_correlation_matrix, ax=axes[0, 0],
+                xticklabels=layers, yticklabels=layers,
+                cmap='RdBu_r', vmin=-1, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Correlation'})
+    axes[0, 0].set_title('Unconditional Correlation', fontsize=14)
+    
+    sns.heatmap(unconditional_cka_matrix, ax=axes[0, 1],
+                xticklabels=layers, yticklabels=layers,
+                cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'CKA'})
+    axes[0, 1].set_title('Unconditional CKA', fontsize=14)
+    
+    # Difference plot (unconditional - conditional)
+    diff_correlation = unconditional_correlation_matrix - conditional_correlation_matrix
+    sns.heatmap(diff_correlation, ax=axes[0, 2],
+                xticklabels=layers, yticklabels=layers,
+                cmap='coolwarm', center=0, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Difference'})
+    axes[0, 2].set_title('Correlation Difference\n(Unconditional - Conditional)', fontsize=14)
+    
+    # Row 2: Conditional metrics
+    sns.heatmap(conditional_correlation_matrix, ax=axes[1, 0],
+                xticklabels=layers, yticklabels=layers,
+                cmap='RdBu_r', vmin=-1, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Partial Correlation'})
+    axes[1, 0].set_title(f'Partial Correlation | {cnn_output_layer}', fontsize=14)
+    
+    sns.heatmap(conditional_cka_residual_matrix, ax=axes[1, 1],
+                xticklabels=layers, yticklabels=layers,
+                cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Conditional CKA'})
+    axes[1, 1].set_title(f'Conditional CKA (Residual) | {cnn_output_layer}', fontsize=14)
+    
+    sns.heatmap(conditional_cka_partial_matrix, ax=axes[1, 2],
+                xticklabels=layers, yticklabels=layers,
+                cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Conditional CKA'})
+    axes[1, 2].set_title(f'Conditional CKA (Partial) | {cnn_output_layer}', fontsize=14)
+    
+    plt.suptitle(f'Conditional vs Unconditional Layer Similarity - {model_name} (n={num_files} files)\nConditioned on {cnn_output_layer}', fontsize=16)
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/conditional_layer_similarity_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Save matrices
+    np.save(f'{output_dir}/conditional_correlation_matrix.npy', conditional_correlation_matrix)
+    np.save(f'{output_dir}/conditional_cka_residual_matrix.npy', conditional_cka_residual_matrix)
+    np.save(f'{output_dir}/conditional_cka_partial_matrix.npy', conditional_cka_partial_matrix)
+    
+    # Create a summary plot showing the effect of conditioning
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Plot 1: Average correlation with and without conditioning
+    avg_uncond_corr = []
+    avg_cond_corr = []
+    for i in range(n_layers):
+        # Average correlation with other layers (excluding self)
+        mask = np.ones(n_layers, dtype=bool)
+        mask[i] = False
+        avg_uncond_corr.append(np.mean(np.abs(unconditional_correlation_matrix[i, mask])))
+        avg_cond_corr.append(np.mean(np.abs(conditional_correlation_matrix[i, mask])))
+    
+    x = np.arange(n_layers)
+    width = 0.35
+    axes[0].bar(x - width/2, avg_uncond_corr, width, label='Unconditional', alpha=0.8)
+    axes[0].bar(x + width/2, avg_cond_corr, width, label='Conditional', alpha=0.8)
+    axes[0].set_xlabel('Layer')
+    axes[0].set_ylabel('Average Absolute Correlation')
+    axes[0].set_title('Effect of CNN Conditioning on Correlation')
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(layers, rotation=45, ha='right')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # Plot 2: Similar for CKA
+    avg_uncond_cka = []
+    avg_cond_cka = []
+    for i in range(n_layers):
+        mask = np.ones(n_layers, dtype=bool)
+        mask[i] = False
+        avg_uncond_cka.append(np.mean(unconditional_cka_matrix[i, mask]))
+        avg_cond_cka.append(np.mean(conditional_cka_residual_matrix[i, mask]))
+    
+    axes[1].bar(x - width/2, avg_uncond_cka, width, label='Unconditional', alpha=0.8)
+    axes[1].bar(x + width/2, avg_cond_cka, width, label='Conditional', alpha=0.8)
+    axes[1].set_xlabel('Layer')
+    axes[1].set_ylabel('Average CKA')
+    axes[1].set_title('Effect of CNN Conditioning on CKA')
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(layers, rotation=45, ha='right')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.suptitle(f'Impact of CNN Conditioning on Layer Similarities - {model_name}', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/conditioning_effect_summary_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    return conditional_correlation_matrix, conditional_cka_residual_matrix, conditional_cka_partial_matrix
+
+# Add this function to be called from main()
+def analyze_cnn_influence(layer_features, original_lengths, output_dir, model_name, num_files):
+    """
+    Analyze how much each layer's representation is influenced by the CNN output.
+    """
+    cnn_output_layer = 'transformer_input'
+    if cnn_output_layer not in layer_features:
+        print(f"Warning: {cnn_output_layer} not found. Skipping CNN influence analysis.")
+        return
+    
+    cnn_features = layer_features[cnn_output_layer]
+    
+    # Get all transformer layers
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer != cnn_output_layer and
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    
+    # Compute R² values showing how much variance in each layer is explained by CNN output
+    r2_scores = []
+    layer_names = []
+    
+    for layer in layers:
+        features = layer_features[layer]
+        
+        # Ensure same batch size
+        min_batch = min(features.shape[0], cnn_features.shape[0])
+        features = features[:min_batch]
+        cnn_batch = cnn_features[:min_batch]
+        
+        # Reshape to 2D
+        X = features.reshape(-1, features.shape[-1])
+        Z = cnn_batch.reshape(-1, cnn_batch.shape[-1])
+        
+        # Ensure same number of samples
+        min_samples = min(X.shape[0], Z.shape[0])
+        X = X[:min_samples]
+        Z = Z[:min_samples]
+        
+        # Compute R² for each dimension
+        r2_per_dim = []
+        for dim in range(X.shape[1]):
+            reg = LinearRegression()
+            reg.fit(Z, X[:, dim])
+            r2 = reg.score(Z, X[:, dim])
+            r2_per_dim.append(r2)
+        
+        # Average R² across dimensions
+        avg_r2 = np.mean(r2_per_dim)
+        r2_scores.append(avg_r2)
+        layer_names.append(layer)
+    
+    # Plot R² decay
+    plt.figure(figsize=(12, 6))
+    plt.plot(range(len(layers)), r2_scores, 'o-', linewidth=2, markersize=8)
+    plt.xlabel('Layer')
+    plt.ylabel('R² (Variance Explained by CNN Output)')
+    plt.title(f'CNN Influence Decay Across Transformer Layers - {model_name}')
+    plt.xticks(range(len(layers)), layer_names, rotation=45, ha='right')
+    plt.grid(True, alpha=0.3)
+    
+    # Add text annotations for R² values
+    for i, r2 in enumerate(r2_scores):
+        plt.annotate(f'{r2:.3f}', xy=(i, r2), xytext=(0, 5), 
+                    textcoords='offset points', ha='center', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/cnn_influence_decay_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    return r2_scores
+
 def main():
     parser = argparse.ArgumentParser(description="Visualize HuBERT features")
     parser.add_argument("--features_dir", type=str, 
@@ -1021,20 +1439,57 @@ def main():
         print("Some visualizations may be skipped or may not be meaningful")
     
     # Load features
+    print("Loading features...")
     layer_features, original_lengths = load_features(args.features_dir, args.num_files)
     
-    # Generate visualizations
-    print("Generating visualizations...")
-    # plot_feature_distributions(layer_features, args.output_dir, args.model_name, args.num_files)
-    plot_layer_similarity_improved(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
-    # plot_dimensionality_reduction(layer_features, args.output_dir, args.model_name, args.num_files)
-    # plot_layer_statistics(layer_features, args.output_dir, args.model_name, args.num_files)
-    # plot_cca_analysis(layer_features, args.output_dir, args.model_name, args.num_files)
-    analyze_feature_divergence(layer_features, args.output_dir, args.model_name, args.num_files)
+    # Check if CNN output layer exists
+    cnn_output_layer = 'transformer_input'
+    if cnn_output_layer not in layer_features:
+        print(f"Error: Required layer '{cnn_output_layer}' not found in features.")
+        print("Available layers:", list(layer_features.keys()))
+        return
     
-    # Add padding ratio visualization
-    print("\nGenerating padding ratio visualization...")
-    padding_ratios = plot_padding_ratios(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    # Generate original visualizations
+    print("\nGenerating visualizations...")
+    
+    # # Original unconditional similarity analysis
+    # print("\nComputing unconditional layer similarities...")
+    # plot_layer_similarity_improved(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    
+    # NEW: Conditional similarity analysis
+    print("\nComputing CNN-conditioned layer similarities...")
+    try:
+        plot_conditional_layer_similarity(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    except Exception as e:
+        print(f"Error in conditional similarity analysis: {e}")
+        print("Continuing with other analyses...")
+    
+    # NEW: Analyze CNN influence decay
+    print("\nAnalyzing CNN influence across layers...")
+    try:
+        r2_scores = analyze_cnn_influence(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    except Exception as e:
+        print(f"Error in CNN influence analysis: {e}")
+        r2_scores = None
+    
+    # # Original divergence analysis (for comparison)
+    # print("\nAnalyzing feature divergence from CNN boundary...")
+    # analyze_feature_divergence(layer_features, args.output_dir, args.model_name, args.num_files)
+    
+    # # Add padding ratio visualization
+    # print("\nGenerating padding ratio visualization...")
+    # padding_ratios = plot_padding_ratios(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+
+    # Print summary of CNN influence
+    if r2_scores is not None:
+        print("\n=== CNN Influence Summary ===")
+        print(f"Average R² (CNN influence) by layer depth:")
+        layers = sorted([layer for layer in layer_features.keys() 
+                        if layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11],
+                       key=get_layer_number)
+        for i, (layer, r2) in enumerate(zip(layers, r2_scores)):
+            print(f"  {layer}: {r2:.3f} ({(1-r2)*100:.1f}% independent of CNN)")
+        print(f"\nOverall CNN influence decay: {r2_scores[0]:.3f} → {r2_scores[-1]:.3f}")
     
     print("\nGenerating temporal animations...")
     temporal_similarities = compute_temporal_similarities(
@@ -1048,7 +1503,9 @@ def main():
     for metric in ['cosine', 'correlation', 'cka']:
         create_similarity_animation(temporal_similarities, args.output_dir, args.model_name, metric)
     
-    print(f"All visualizations saved to {args.output_dir}")
+ 
+    
+    print(f"\nAll visualizations saved to {args.output_dir}")
 
 if __name__ == "__main__":
     main()
