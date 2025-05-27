@@ -8,6 +8,9 @@ import umap
 import argparse
 import torch
 from sklearn.cross_decomposition import CCA
+from tqdm import tqdm
+from matplotlib.animation import FuncAnimation
+from matplotlib.animation import PillowWriter
 
 def pad_features(features, max_length):
     """Pad features to a consistent length."""
@@ -25,7 +28,7 @@ def pad_features(features, max_length):
 def load_features(features_dir, num_files=3):
     """Load features from a subset of .npz files in the directory."""
     features_dir = Path(features_dir)
-    feature_files = list(features_dir.glob("*_features.npz"))
+    feature_files = list(features_dir.glob("*_complete_features.npz"))
     
     # Take only the first num_files
     feature_files = feature_files[:num_files]
@@ -33,30 +36,36 @@ def load_features(features_dir, num_files=3):
     # Dictionary to store features for each layer
     layer_features = {}
     max_lengths = {}  # Track max length for each layer
+    original_lengths = {}  # Track original lengths before padding
     
     print(f"Loading features from {len(feature_files)} files...")
-    for file_path in feature_files:
-        print(f"Processing {file_path}")
-        data = np.load(file_path)
-        for key in data.files:
-            if key not in layer_features:
-                layer_features[key] = []
-                max_lengths[key] = 0
-            features = data[key]
-            # Get the time dimension (second dimension for 3D, first for 2D)
-            time_dim = features.shape[1] if len(features.shape) == 3 else features.shape[0]
-            max_lengths[key] = max(max_lengths[key], time_dim)
-            layer_features[key].append(features)
-            print(f"Layer {key}: shape {features.shape}, max_length {max_lengths[key]}")
+    for chkpnt_file_path in feature_files:
+        print(f"Processing {chkpnt_file_path}")
+        layer_features_contextualized = np.load(chkpnt_file_path)
+            
+        for layer in layer_features_contextualized.files:
+            # Only include transformer layers from input to layer 11
+            if layer == 'transformer_input' or (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11):
+                if layer not in layer_features:
+                    layer_features[layer] = []
+                    max_lengths[layer] = 0
+                    original_lengths[layer] = []  # Initialize list for original lengths
+                features = layer_features_contextualized[layer]
+                # Get the time dimension (second dimension for 3D, first for 2D)
+                time_dim = features.shape[1] if len(features.shape) == 3 else features.shape[0]
+                max_lengths[layer] = max(max_lengths[layer], time_dim)
+                original_lengths[layer].append(time_dim)  # Store original length
+                layer_features[layer].append(features)
+                print(f"Layer {layer}: shape {features.shape}, max_length {max_lengths[layer]}")
     
     # Pad and concatenate features
-    for key in layer_features:
-        print(f"Padding layer {key} to length {max_lengths[key]}")
-        padded_features = [pad_features(f, max_lengths[key]) for f in layer_features[key]]
-        layer_features[key] = np.concatenate(padded_features, axis=0)
-        print(f"Final shape for layer {key}: {layer_features[key].shape}")
+    for layer in layer_features:
+        print(f"Padding layer {layer} to length {max_lengths[layer]}")
+        padded_features = [pad_features(f, max_lengths[layer]) for f in layer_features[layer]]
+        layer_features[layer] = np.concatenate(padded_features, axis=0)
+        print(f"Final shape for layer {layer}: {layer_features[layer].shape}")
     
-    return layer_features
+    return layer_features, original_lengths  # Return both features and original lengths
 
 def plot_feature_distributions(layer_features, output_dir, model_name, num_files):
     """Plot feature distributions for each layer."""
@@ -89,50 +98,195 @@ def plot_feature_distributions(layer_features, output_dir, model_name, num_files
     plt.savefig(f'{output_dir}/feature_distributions_{model_name}_n{num_files}.png')
     plt.close()
 
-def plot_layer_similarity(layer_features, output_dir, model_name, num_files):
-    """Plot similarity matrix between layers."""
-    # Sort layers numerically instead of alphabetically
-    def get_layer_number(layer_name):
-        return int(layer_name.split('_')[1]) if layer_name.startswith('layer_') else int(layer_name.split('_')[1])
+def get_layer_number(layer_name):
+    """Get layer number for sorting, handling transformer input and layers."""
+    if layer_name == 'transformer_input':
+        return -1  # Put input layer first
+    elif layer_name.startswith('transformer_layer_'):
+        layer_num = int(layer_name.split('_')[-1])
+        if layer_num <= 11:  # Only include up to layer 11
+            return layer_num
+    return float('inf')  # Put other layers at the end - ignore layers 12 and above and exclude from analysis
+
+def compute_cka(X, Y):
+    """
+    Compute CKA (Centered Kernel Alignment) between two representations.
     
-    # Get and sort layers
-    layers = list(layer_features.keys())
-    layers.sort(key=get_layer_number)
-    print(f"Sorted layers: {layers}")  # Debug print
+    Args:
+        X: (n_samples, n_features1)
+        Y: (n_samples, n_features2)
     
+    Returns:
+        CKA similarity score
+    """
+    # Center the matrices
+    X = X - X.mean(axis=0, keepdims=True)
+    Y = Y - Y.mean(axis=0, keepdims=True)
+    
+    # Compute Gram matrices (linear kernel)
+    K = X @ X.T  # (n_samples, n_samples)
+    L = Y @ Y.T  # (n_samples, n_samples)
+    
+    # Center the Gram matrices
+    n = K.shape[0]
+    H = np.eye(n) - np.ones((n, n)) / n  # Centering matrix
+    K_centered = H @ K @ H
+    L_centered = H @ L @ H
+    
+    # Compute HSIC (Hilbert-Schmidt Independence Criterion)
+    hsic = np.trace(K_centered @ L_centered) / (n - 1)**2
+    
+    # Compute normalization
+    var_K = np.trace(K_centered @ K_centered) / (n - 1)**2
+    var_L = np.trace(L_centered @ L_centered) / (n - 1)**2
+    
+    # Compute CKA
+    cka = hsic / np.sqrt(var_K * var_L + 1e-8)
+    
+    return cka
+
+def compute_cka_without_padding(features1, features2, orig_lens1, orig_lens2):
+    """
+    Compute CKA excluding padded time steps.
+    
+    Args:
+        features1, features2: Padded features (batch, time, dim)
+        orig_lens1, orig_lens2: Lists of original lengths for each batch item
+    """
+    all_X = []
+    all_Y = []
+    
+    batch_size = features1.shape[0]
+    
+    for b in range(batch_size):
+        # Get original length for this batch item
+        orig_len1 = orig_lens1[b] if b < len(orig_lens1) else features1.shape[1]
+        orig_len2 = orig_lens2[b] if b < len(orig_lens2) else features2.shape[1]
+        orig_len = min(orig_len1, orig_len2)  # Use minimum to ensure both are valid
+        
+        # Extract only non-padded time steps
+        X = features1[b, :orig_len, :]  # (time, dim)
+        Y = features2[b, :orig_len, :]
+        
+        all_X.append(X)
+        all_Y.append(Y)
+    
+    # Concatenate all valid samples
+    X = np.vstack(all_X)  # (total_valid_samples, dim)
+    Y = np.vstack(all_Y)
+    
+    # Ensure same number of samples
+    min_samples = min(X.shape[0], Y.shape[0])
+    X = X[:min_samples]
+    Y = Y[:min_samples]
+    
+    return compute_cka(X, Y)
+
+def plot_layer_similarity_improved(layer_features, original_lengths, output_dir, model_name, num_files):
+    """Plot improved similarity matrix between layers."""
+    
+    # Filter and sort layers (only include transformer input and layers 0-11)
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer == 'transformer_input' or 
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
     n_layers = len(layers)
-    similarity_matrix = np.zeros((n_layers, n_layers))
     
-    # Compute cosine similarity between layers
+    # Multiple similarity metrics
+    cosine_matrix = np.zeros((n_layers, n_layers))
+    correlation_matrix = np.zeros((n_layers, n_layers))
+    cka_matrix = np.zeros((n_layers, n_layers))
+    
     for i, layer1 in enumerate(layers):
         for j, layer2 in enumerate(layers):
             features1 = layer_features[layer1]
             features2 = layer_features[layer2]
-            # Reshape to 2D if needed
-            if len(features1.shape) > 2:
-                features1 = features1.reshape(features1.shape[0], -1)
-            if len(features2.shape) > 2:
-                features2 = features2.reshape(features2.shape[0], -1)
-            # Compute similarity
-            similarity = np.dot(features1.flatten(), features2.flatten()) / (
-                np.linalg.norm(features1.flatten()) * np.linalg.norm(features2.flatten())
-            )
-            similarity_matrix[i, j] = similarity
+            
+            # Ensure same batch size
+            min_batch = min(features1.shape[0], features2.shape[0])
+            features1 = features1[:min_batch]
+            features2 = features2[:min_batch]
+            
+            # Method 1: Average cosine similarity
+            f1_avg = features1.mean(axis=1)  # (batch, features)
+            f2_avg = features2.mean(axis=1)  # (batch, features)
+            
+            # Ensure same feature dimension for cosine/correlation
+            min_features = min(f1_avg.shape[1], f2_avg.shape[1])   # --??
+            f1_avg_truncated = f1_avg[:, :min_features]
+            f2_avg_truncated = f2_avg[:, :min_features]
+            
+            # Compute cosine similarity
+            cos_sims = []
+            for b in range(min_batch):
+                cos_sim = np.dot(f1_avg_truncated[b], f2_avg_truncated[b]) / (
+                    np.linalg.norm(f1_avg_truncated[b]) * np.linalg.norm(f2_avg_truncated[b]) + 1e-8
+                )
+                cos_sims.append(cos_sim)
+            cosine_matrix[i, j] = np.mean(cos_sims)
+            
+            # Method 2: Correlation
+            correlation_matrix[i, j] = np.corrcoef(
+                f1_avg_truncated.flatten(), f2_avg_truncated.flatten()
+            )[0, 1]
+            
+            # Method 3: CKA - works with different dimensions!
+            if layer1 in original_lengths and layer2 in original_lengths:
+                cka_matrix[i, j] = compute_cka_without_padding(
+                    features1, features2, 
+                    original_lengths[layer1], 
+                    original_lengths[layer2]
+                )
+            else:
+                # Fallback to original method if lengths not available
+                X = features1.reshape(features1.shape[0] * features1.shape[1], -1)
+                Y = features2.reshape(features2.shape[0] * features2.shape[1], -1)
+                min_samples = min(X.shape[0], Y.shape[0])
+                X = X[:min_samples]
+                Y = Y[:min_samples]
+                cka_matrix[i, j] = compute_cka(X, Y)
     
-    plt.figure(figsize=(12, 10))
-    # Create heatmap with explicit layer ordering
-    sns.heatmap(similarity_matrix, 
-                xticklabels=layers, 
-                yticklabels=layers,
-                cmap='viridis')
+    # Create subplots for different metrics
+    fig, axes = plt.subplots(1, 3, figsize=(24, 7))
     
-    # Ensure y-axis is in correct order (top to bottom)
-    plt.gca().invert_yaxis()
+    # Cosine similarity
+    sns.heatmap(cosine_matrix, ax=axes[0], 
+                xticklabels=layers, yticklabels=layers,
+                cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Similarity'})
+    axes[0].set_title('Cosine Similarity (Time-Averaged)', fontsize=14)
+    axes[0].set_xlabel('Layer')
+    axes[0].set_ylabel('Layer')
     
-    plt.title(f'Layer-wise Similarity Matrix\nModel: {model_name}')
+    # Correlation
+    sns.heatmap(correlation_matrix, ax=axes[1],
+                xticklabels=layers, yticklabels=layers,
+                cmap='RdBu_r', vmin=-1, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'Correlation'})
+    axes[1].set_title('Correlation (Time-Averaged)', fontsize=14)
+    axes[1].set_xlabel('Layer')
+    axes[1].set_ylabel('Layer')
+    
+    # CKA
+    sns.heatmap(cka_matrix, ax=axes[2],
+                xticklabels=layers, yticklabels=layers,
+                cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                cbar_kws={'label': 'CKA Similarity'})
+    axes[2].set_title('CKA (Centered Kernel Alignment)', fontsize=14)
+    axes[2].set_xlabel('Layer')
+    axes[2].set_ylabel('Layer')
+    
+    plt.suptitle(f'Layer Similarity Analysis - {model_name} (n={num_files} files)', fontsize=16)
     plt.tight_layout()
-    plt.savefig(f'{output_dir}/layer_similarity_{model_name}_n{num_files}.png')
+    plt.savefig(f'{output_dir}/layer_similarity_improved_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
     plt.close()
+    
+    # Also save individual metrics for detailed analysis
+    np.save(f'{output_dir}/cosine_similarity_matrix.npy', cosine_matrix)
+    np.save(f'{output_dir}/correlation_matrix.npy', correlation_matrix)
+    np.save(f'{output_dir}/cka_matrix.npy', cka_matrix)
+    
+    return cosine_matrix, correlation_matrix, cka_matrix
 
 def plot_dimensionality_reduction(layer_features, output_dir, model_name, num_files):
     """Plot PCA, t-SNE, and UMAP visualizations for selected layers."""
@@ -386,15 +540,23 @@ def analyze_feature_divergence(layer_features, output_dir, model_name, num_files
     """Analyze how features diverge from the CNN-transformer boundary."""
     # Sort layers numerically
     def get_layer_number(layer_name):
-        return int(layer_name.split('_')[1]) if layer_name.startswith('layer_') else int(layer_name.split('_')[1])
+        if layer_name == 'transformer_input':
+            return -1  # Put input layer first
+        elif layer_name.startswith('transformer_layer_'):
+            layer_num = int(layer_name.split('_')[-1])
+            if layer_num <= 11:  # Only include up to layer 11
+                return layer_num
+        return float('inf')  # Put other layers at the end
     
-    layers = sorted(layer_features.keys(), key=get_layer_number)
+    # Filter and sort layers (only include transformer input and layers 0-11)
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer == 'transformer_input' or 
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
     
-    # Use layer 7 (CNN-to-transformer boundary) as reference
-    reference_layer = 'layer_7'
-    if reference_layer not in layer_features:
-        print(f"Warning: {reference_layer} not found. Using layer_6 as reference.")
-        reference_layer = 'layer_6'
+    # Use the first layer as reference
+    reference_layer = layers[0]
+    print(f"Using {reference_layer} as reference layer for divergence analysis")
     
     reference_features = layer_features[reference_layer]
     if len(reference_features.shape) > 2:
@@ -584,10 +746,261 @@ def plot_cca_analysis(layer_features, output_dir, model_name, num_files):
     plt.savefig(f'{output_dir}/cca_matrix_{model_name}_n{num_files}.png')
     plt.close()
 
+def compute_temporal_similarities(layer_features, original_lengths, window_size=10, stride=5):
+    """
+    Compute layer similarities for sliding windows across time.
+    """
+    # Filter and sort layers
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer == 'transformer_input' or 
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    
+    n_layers = len(layers)
+    
+    # Get the minimum time steps across all layers
+    min_time_steps = min([features.shape[1] for features in layer_features.values()])
+    
+    # Calculate number of windows
+    n_windows = (min_time_steps - window_size) // stride + 1
+    
+    # Store similarity matrices for each time window
+    cosine_matrices = []
+    correlation_matrices = []
+    cka_matrices = []
+    
+    print(f"Computing similarities for {n_windows} time windows...")
+    
+    for window_idx in tqdm(range(n_windows)):
+        start_time = window_idx * stride
+        end_time = start_time + window_size
+        
+        # Compute similarities for this time window
+        cosine_matrix = np.zeros((n_layers, n_layers))
+        correlation_matrix = np.zeros((n_layers, n_layers))
+        cka_matrix = np.zeros((n_layers, n_layers))
+        
+        for i, layer1 in enumerate(layers):
+            for j, layer2 in enumerate(layers):
+                # Extract features for this time window
+                features1 = layer_features[layer1][:, start_time:end_time, :]
+                features2 = layer_features[layer2][:, start_time:end_time, :]
+                
+                # Ensure same batch size
+                min_batch = min(features1.shape[0], features2.shape[0])
+                features1 = features1[:min_batch]
+                features2 = features2[:min_batch]
+                
+                # Average over time window
+                f1_avg = features1.mean(axis=1)
+                f2_avg = features2.mean(axis=1)
+                
+                # Ensure same feature dimension
+                min_features = min(f1_avg.shape[1], f2_avg.shape[1])
+                f1_avg = f1_avg[:, :min_features]
+                f2_avg = f2_avg[:, :min_features]
+                
+                # Compute cosine similarity
+                cos_sims = []
+                for b in range(min_batch):
+                    cos_sim = np.dot(f1_avg[b], f2_avg[b]) / (
+                        np.linalg.norm(f1_avg[b]) * np.linalg.norm(f2_avg[b]) + 1e-8
+                    )
+                    cos_sims.append(cos_sim)
+                cosine_matrix[i, j] = np.mean(cos_sims)
+                
+                # Compute correlation
+                if f1_avg.size > 0 and f2_avg.size > 0:
+                    correlation_matrix[i, j] = np.corrcoef(
+                        f1_avg.flatten(), f2_avg.flatten()
+                    )[0, 1]
+                
+                # Compute CKA for this window
+                if layer1 in original_lengths and layer2 in original_lengths:
+                    # Create temporary lengths for this window
+                    temp_lens1 = []
+                    temp_lens2 = []
+                    
+                    for orig_len1, orig_len2 in zip(original_lengths[layer1], original_lengths[layer2]):
+                        # Adjust lengths for this window
+                        valid_len1 = max(0, min(orig_len1 - start_time, window_size))
+                        valid_len2 = max(0, min(orig_len2 - start_time, window_size))
+                        temp_lens1.append(valid_len1)
+                        temp_lens2.append(valid_len2)
+                    
+                    if any(l > 0 for l in temp_lens1) and any(l > 0 for l in temp_lens2):
+                        cka_matrix[i, j] = compute_cka_without_padding(
+                            features1, features2,
+                            temp_lens1, temp_lens2
+                        )
+                    else:
+                        cka_matrix[i, j] = 0.0
+                else:
+                    # Fallback to original method
+                    X = features1.reshape(-1, features1.shape[-1])
+                    Y = features2.reshape(-1, features2.shape[-1])
+                    min_samples = min(X.shape[0], Y.shape[0])
+                    if min_samples > 1:
+                        cka_matrix[i, j] = compute_cka(X[:min_samples], Y[:min_samples])
+                    else:
+                        cka_matrix[i, j] = 0.0
+        
+        cosine_matrices.append(cosine_matrix)
+        correlation_matrices.append(correlation_matrix)
+        cka_matrices.append(cka_matrix)
+    
+    return {
+        'cosine': cosine_matrices,
+        'correlation': correlation_matrices,
+        'cka': cka_matrices,
+        'layers': layers,
+        'window_size': window_size,
+        'stride': stride
+    }
+
+def create_similarity_animation(temporal_similarities, output_dir, model_name, metric='cosine'):
+    """
+    Create an animation showing how similarities evolve over time.
+    """
+    matrices = temporal_similarities[metric]
+    layers = temporal_similarities['layers']
+    window_size = temporal_similarities['window_size']
+    stride = temporal_similarities['stride']
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Set up the initial heatmap
+    im = ax.imshow(matrices[0], cmap='viridis', vmin=0, vmax=1, aspect='auto')
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(f'{metric.capitalize()} Similarity')
+    
+    # Set ticks and labels
+    ax.set_xticks(range(len(layers)))
+    ax.set_yticks(range(len(layers)))
+    ax.set_xticklabels(layers, rotation=45, ha='right')
+    ax.set_yticklabels(layers)
+    
+    # Add title
+    title = ax.set_title(f'{metric.capitalize()} Similarity - {model_name}\nTime: 0-{window_size} steps')
+    
+    # Add text annotations for values
+    text_annotations = []
+    for i in range(len(layers)):
+        text_row = []
+        for j in range(len(layers)):
+            text = ax.text(j, i, f'{matrices[0][i, j]:.2f}',
+                         ha='center', va='center', color='white', fontsize=8)
+            text_row.append(text)
+        text_annotations.append(text_row)
+    
+    def update(frame):
+        # Update the heatmap data
+        im.set_array(matrices[frame])
+        
+        # Update title with current time window
+        start_time = frame * stride
+        end_time = start_time + window_size
+        title.set_text(f'{metric.capitalize()} Similarity - {model_name}\nTime: {start_time}-{end_time} steps')
+        
+        # Update text annotations
+        for i in range(len(layers)):
+            for j in range(len(layers)):
+                text_annotations[i][j].set_text(f'{matrices[frame][i, j]:.2f}')
+        
+        return [im, title] + [text for row in text_annotations for text in row]
+    
+    # Create animation
+    anim = FuncAnimation(fig, update, frames=len(matrices), interval=200, blit=True)
+    
+    # Save as GIF
+    output_path = f'{output_dir}/layer_similarity_{metric}_{model_name}_animation.gif'
+    anim.save(output_path, writer=PillowWriter(fps=5))
+    plt.close()
+    
+    print(f"Animation saved to {output_path}")
+    
+    return output_path
+
+def plot_padding_ratios(layer_features, original_lengths, output_dir, model_name, num_files):
+    """Plot the ratio of valid (non-padded) time steps across layers."""
+    # Get all layers
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer == 'transformer_input' or 
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    
+    # Get max sequence length
+    max_length = max(features.shape[1] for features in layer_features.values())
+    
+    # Initialize padding ratio matrices
+    # Aggregate across all files
+    aggregate_padding_ratios = np.zeros((len(layers), max_length))
+    # Per-file padding ratios
+    per_file_padding_ratios = []
+    
+    # Compute padding ratios for each layer and time step
+    for i, layer in enumerate(layers):
+        if layer in original_lengths:
+            # For aggregate
+            for t in range(max_length):
+                valid_count = sum(1 for length in original_lengths[layer] if t < length)
+                aggregate_padding_ratios[i, t] = valid_count / len(original_lengths[layer])
+            
+            # For per-file
+            file_ratios = np.zeros((len(original_lengths[layer]), max_length))
+            for file_idx, length in enumerate(original_lengths[layer]):
+                file_ratios[file_idx, :length] = 1.0  # Valid up to original length
+            per_file_padding_ratios.append(file_ratios)
+    
+    # Create visualizations
+    # 1. Aggregate heatmap
+    plt.figure(figsize=(15, 8))
+    sns.heatmap(aggregate_padding_ratios, 
+                xticklabels=50,  # Show every 50th time step
+                yticklabels=layers,
+                cmap='viridis',
+                vmin=0, vmax=1,
+                cbar_kws={'label': 'Ratio of Valid Sequences'})
+    plt.title(f'Aggregate Padding Ratios Across Layers and Time Steps\n{model_name} (n={num_files} files)')
+    plt.xlabel('Time Step')
+    plt.ylabel('Layer')
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/padding_ratios_aggregate_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 2. Per-file heatmaps
+    for layer_idx, layer in enumerate(layers):
+        if layer in original_lengths:
+            plt.figure(figsize=(15, 8))
+            sns.heatmap(per_file_padding_ratios[layer_idx], 
+                        xticklabels=50,
+                        yticklabels=[f'File {i+1}' for i in range(len(original_lengths[layer]))],
+                        cmap='viridis',
+                        vmin=0, vmax=1,
+                        cbar_kws={'label': 'Valid Sequence'})
+            plt.title(f'Per-File Padding Ratios for {layer}\n{model_name} (n={num_files} files)')
+            plt.xlabel('Time Step')
+            plt.ylabel('File')
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/padding_ratios_per_file_{layer}_{model_name}_n{num_files}.png', dpi=300, bbox_inches='tight')
+            plt.close()
+    
+    # Save the raw data
+    np.save(f'{output_dir}/padding_ratios_aggregate_{model_name}_n{num_files}.npy', aggregate_padding_ratios)
+    for layer_idx, layer in enumerate(layers):
+        if layer in original_lengths:
+            np.save(f'{output_dir}/padding_ratios_per_file_{layer}_{model_name}_n{num_files}.npy', 
+                   per_file_padding_ratios[layer_idx])
+    
+    return aggregate_padding_ratios, per_file_padding_ratios
+
 def main():
     parser = argparse.ArgumentParser(description="Visualize HuBERT features")
     parser.add_argument("--features_dir", type=str, 
-                      default="/home/sarcosh1/repos/layerwise-analysis/output/hubert/librispeech_dev-clean_sample1",
+                      default="/home/sarcosh1/repos/layerwise-analysis/output/hubert-complete/librispeech_dev-clean_sample1",
                       help="Directory containing feature .npz files")
     parser.add_argument("--output_dir", type=str,
                       default="/home/sarcosh1/repos/layerwise-analysis/output/visualizations",
@@ -608,18 +1021,34 @@ def main():
         print("Some visualizations may be skipped or may not be meaningful")
     
     # Load features
-    layer_features = load_features(args.features_dir, args.num_files)
+    layer_features, original_lengths = load_features(args.features_dir, args.num_files)
     
     # Generate visualizations
     print("Generating visualizations...")
     # plot_feature_distributions(layer_features, args.output_dir, args.model_name, args.num_files)
-    plot_layer_similarity(layer_features, args.output_dir, args.model_name, args.num_files)
-    plot_dimensionality_reduction(layer_features, args.output_dir, args.model_name, args.num_files)
+    plot_layer_similarity_improved(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    # plot_dimensionality_reduction(layer_features, args.output_dir, args.model_name, args.num_files)
     # plot_layer_statistics(layer_features, args.output_dir, args.model_name, args.num_files)
     # plot_cca_analysis(layer_features, args.output_dir, args.model_name, args.num_files)
     analyze_feature_divergence(layer_features, args.output_dir, args.model_name, args.num_files)
     
-    print(f"Visualizations saved to {args.output_dir}")
+    # Add padding ratio visualization
+    print("\nGenerating padding ratio visualization...")
+    padding_ratios = plot_padding_ratios(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    
+    print("\nGenerating temporal animations...")
+    temporal_similarities = compute_temporal_similarities(
+        layer_features, 
+        original_lengths,
+        window_size=20,
+        stride=10
+    )
+    
+    # Create animations for each metric
+    for metric in ['cosine', 'correlation', 'cka']:
+        create_similarity_animation(temporal_similarities, args.output_dir, args.model_name, metric)
+    
+    print(f"All visualizations saved to {args.output_dir}")
 
 if __name__ == "__main__":
     main()
