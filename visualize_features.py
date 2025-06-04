@@ -1348,6 +1348,16 @@ def analyze_cnn_influence(layer_features, original_lengths, output_dir, model_na
     """
     Analyze how much each layer's representation is influenced by the CNN output.
     """
+    def get_layer_number(layer_name):
+        """Get layer number for sorting, handling transformer input and layers."""
+        if layer_name == 'transformer_input':
+            return -1  # Put input layer first
+        elif layer_name.startswith('transformer_layer_'):
+            layer_num = int(layer_name.split('_')[-1])
+            if layer_num <= 11:  # Only include up to layer 11
+                return layer_num
+        return float('inf')  # Put other layers at the end
+    
     cnn_output_layer = 'transformer_input'
     if cnn_output_layer not in layer_features:
         print(f"Warning: {cnn_output_layer} not found. Skipping CNN influence analysis.")
@@ -1415,10 +1425,534 @@ def analyze_cnn_influence(layer_features, original_lengths, output_dir, model_na
     
     return r2_scores
 
+# Temporal similarity analysis for conditional analysis
+def compute_conditional_temporal_similarities(layer_features, original_lengths, window_size=10, stride=5):
+    """
+    Compute conditional layer similarities (conditioned on CNN output) for sliding windows across time.
+    """
+    # Get CNN output layer
+    cnn_output_layer = 'transformer_input'
+    if cnn_output_layer not in layer_features:
+        print(f"Warning: {cnn_output_layer} not found. Cannot compute conditional similarities.")
+        return None
+    
+    cnn_features = layer_features[cnn_output_layer]
+    
+    # Filter and sort layers (excluding CNN output)
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer != cnn_output_layer and
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    
+    n_layers = len(layers)
+    
+    # Get the minimum time steps across all layers
+    min_time_steps = min([features.shape[1] for features in layer_features.values()])
+    
+    # Calculate number of windows
+    n_windows = (min_time_steps - window_size) // stride + 1
+    
+    # Store similarity matrices for each time window
+    # Unconditional matrices (for comparison)
+    uncond_correlation_matrices = []
+    uncond_cka_matrices = []
+    
+    # Conditional matrices
+    partial_correlation_matrices = []
+    conditional_cka_residual_matrices = []
+    conditional_cka_partial_matrices = []
+    
+    print(f"Computing conditional similarities for {n_windows} time windows...")
+    
+    for window_idx in tqdm(range(n_windows), desc="Processing time windows"):
+        start_time = window_idx * stride
+        end_time = start_time + window_size
+        
+        # Initialize matrices for this window
+        uncond_corr_matrix = np.zeros((n_layers, n_layers))
+        uncond_cka_matrix = np.zeros((n_layers, n_layers))
+        partial_corr_matrix = np.zeros((n_layers, n_layers))
+        cond_cka_res_matrix = np.zeros((n_layers, n_layers))
+        cond_cka_part_matrix = np.zeros((n_layers, n_layers))
+        
+        for i, layer1 in enumerate(layers):
+            for j, layer2 in enumerate(layers):
+                # Extract features for this time window
+                features1 = layer_features[layer1][:, start_time:end_time, :]
+                features2 = layer_features[layer2][:, start_time:end_time, :]
+                cnn_window = cnn_features[:, start_time:end_time, :]
+                
+                # Ensure same batch size
+                min_batch = min(features1.shape[0], features2.shape[0], cnn_window.shape[0])
+                features1 = features1[:min_batch]
+                features2 = features2[:min_batch]
+                cnn_window = cnn_window[:min_batch]
+                
+                # Handle padding if original lengths are available
+                if (layer1 in original_lengths and layer2 in original_lengths and 
+                    cnn_output_layer in original_lengths):
+                    # Create temporary lengths for this window
+                    all_X = []
+                    all_Y = []
+                    all_Z = []
+                    
+                    for b in range(min_batch):
+                        # Adjust lengths for this window
+                        valid_len1 = max(0, min(original_lengths[layer1][b] - start_time, window_size))
+                        valid_len2 = max(0, min(original_lengths[layer2][b] - start_time, window_size))
+                        valid_len_cnn = max(0, min(original_lengths[cnn_output_layer][b] - start_time, window_size))
+                        valid_len = min(valid_len1, valid_len2, valid_len_cnn)
+                        
+                        if valid_len > 0:
+                            all_X.append(features1[b, :valid_len, :])
+                            all_Y.append(features2[b, :valid_len, :])
+                            all_Z.append(cnn_window[b, :valid_len, :])
+                    
+                    if all_X and all_Y and all_Z:
+                        X = np.vstack(all_X)
+                        Y = np.vstack(all_Y)
+                        Z = np.vstack(all_Z)
+                    else:
+                        continue
+                else:
+                    # Reshape to 2D
+                    X = features1.reshape(-1, features1.shape[-1])
+                    Y = features2.reshape(-1, features2.shape[-1])
+                    Z = cnn_window.reshape(-1, cnn_window.shape[-1])
+                
+                # Ensure same number of samples
+                min_samples = min(X.shape[0], Y.shape[0], Z.shape[0])
+                if min_samples < 2:
+                    continue
+                
+                X = X[:min_samples]
+                Y = Y[:min_samples]
+                Z = Z[:min_samples]
+                
+                try:
+                    # Compute unconditional metrics
+                    uncond_corr_matrix[i, j] = np.corrcoef(X.flatten(), Y.flatten())[0, 1]
+                    uncond_cka_matrix[i, j] = compute_cka(X, Y)
+                    
+                    # Compute conditional metrics
+                    partial_corr_matrix[i, j] = compute_partial_correlation(X, Y, Z)
+                    cond_cka_res_matrix[i, j] = compute_conditional_cka(X, Y, Z, method='residual')
+                    cond_cka_part_matrix[i, j] = compute_conditional_cka(X, Y, Z, method='partial')
+                    
+                except Exception as e:
+                    # Set to NaN for failed computations
+                    uncond_corr_matrix[i, j] = np.nan
+                    uncond_cka_matrix[i, j] = np.nan
+                    partial_corr_matrix[i, j] = np.nan
+                    cond_cka_res_matrix[i, j] = np.nan
+                    cond_cka_part_matrix[i, j] = np.nan
+        
+        # Replace NaN with 0 for visualization
+        uncond_corr_matrix = np.nan_to_num(uncond_corr_matrix, 0)
+        uncond_cka_matrix = np.nan_to_num(uncond_cka_matrix, 0)
+        partial_corr_matrix = np.nan_to_num(partial_corr_matrix, 0)
+        cond_cka_res_matrix = np.nan_to_num(cond_cka_res_matrix, 0)
+        cond_cka_part_matrix = np.nan_to_num(cond_cka_part_matrix, 0)
+        
+        # Append matrices
+        uncond_correlation_matrices.append(uncond_corr_matrix)
+        uncond_cka_matrices.append(uncond_cka_matrix)
+        partial_correlation_matrices.append(partial_corr_matrix)
+        conditional_cka_residual_matrices.append(cond_cka_res_matrix)
+        conditional_cka_partial_matrices.append(cond_cka_part_matrix)
+    
+    return {
+        'unconditional_correlation': uncond_correlation_matrices,
+        'unconditional_cka': uncond_cka_matrices,
+        'partial_correlation': partial_correlation_matrices,
+        'conditional_cka_residual': conditional_cka_residual_matrices,
+        'conditional_cka_partial': conditional_cka_partial_matrices,
+        'layers': layers,
+        'cnn_output_layer': cnn_output_layer,
+        'window_size': window_size,
+        'stride': stride
+    }
+
+def create_conditional_similarity_animation(temporal_similarities, output_dir, model_name, 
+                                          metric='partial_correlation', comparison_mode='side_by_side'):
+    """
+    Create animations showing conditional similarities over time.
+    
+    Args:
+        temporal_similarities: Output from compute_conditional_temporal_similarities
+        output_dir: Directory to save animations
+        model_name: Model name for title
+        metric: One of 'partial_correlation', 'conditional_cka_residual', 'conditional_cka_partial'
+        comparison_mode: 'side_by_side' to show uncond vs cond, 'difference' to show the difference
+    """
+    if temporal_similarities is None:
+        print("No temporal similarities data available.")
+        return
+    
+    # Get the appropriate matrices
+    if metric == 'partial_correlation':
+        cond_matrices = temporal_similarities['partial_correlation']
+        uncond_matrices = temporal_similarities['unconditional_correlation']
+        metric_name = 'Partial Correlation'
+        uncond_name = 'Correlation'
+        vmin, vmax = -1, 1
+        cmap = 'RdBu_r'
+    elif metric == 'conditional_cka_residual':
+        cond_matrices = temporal_similarities['conditional_cka_residual']
+        uncond_matrices = temporal_similarities['unconditional_cka']
+        metric_name = 'Conditional CKA (Residual)'
+        uncond_name = 'CKA'
+        vmin, vmax = 0, 1
+        cmap = 'viridis'
+    elif metric == 'conditional_cka_partial':
+        cond_matrices = temporal_similarities['conditional_cka_partial']
+        uncond_matrices = temporal_similarities['unconditional_cka']
+        metric_name = 'Conditional CKA (Partial)'
+        uncond_name = 'CKA'
+        vmin, vmax = 0, 1
+        cmap = 'viridis'
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+    
+    layers = temporal_similarities['layers']
+    cnn_layer = temporal_similarities['cnn_output_layer']
+    window_size = temporal_similarities['window_size']
+    stride = temporal_similarities['stride']
+    
+    if comparison_mode == 'side_by_side':
+        # Create side-by-side comparison
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
+        
+        # Set up initial heatmaps
+        im1 = ax1.imshow(uncond_matrices[0], cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto')
+        im2 = ax2.imshow(cond_matrices[0], cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto')
+        
+        # Add colorbars
+        cbar1 = plt.colorbar(im1, ax=ax1)
+        cbar1.set_label(uncond_name)
+        cbar2 = plt.colorbar(im2, ax=ax2)
+        cbar2.set_label(metric_name)
+        
+        # Set ticks and labels
+        for ax in [ax1, ax2]:
+            ax.set_xticks(range(len(layers)))
+            ax.set_yticks(range(len(layers)))
+            ax.set_xticklabels(layers, rotation=45, ha='right')
+            ax.set_yticklabels(layers)
+        
+        # Add titles
+        title1 = ax1.set_title(f'Unconditional {uncond_name}')
+        title2 = ax2.set_title(f'{metric_name} | {cnn_layer}')
+        
+        # Main title
+        suptitle = fig.suptitle(f'{model_name} - Time: 0-{window_size} steps')
+        
+        def update(frame):
+            # Update heatmap data
+            im1.set_array(uncond_matrices[frame])
+            im2.set_array(cond_matrices[frame])
+            
+            # Update title with current time window
+            start_time = frame * stride
+            end_time = start_time + window_size
+            suptitle.set_text(f'{model_name} - Time: {start_time}-{end_time} steps')
+            
+            return [im1, im2, suptitle]
+        
+    elif comparison_mode == 'difference':
+        # Show difference between unconditional and conditional
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # Compute initial difference
+        diff_matrix = uncond_matrices[0] - cond_matrices[0]
+        
+        # Set up heatmap
+        im = ax.imshow(diff_matrix, cmap='coolwarm', aspect='auto', 
+                      vmin=-1, vmax=1)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label(f'Difference ({uncond_name} - {metric_name})')
+        
+        # Set ticks and labels
+        ax.set_xticks(range(len(layers)))
+        ax.set_yticks(range(len(layers)))
+        ax.set_xticklabels(layers, rotation=45, ha='right')
+        ax.set_yticklabels(layers)
+        
+        # Add title
+        title = ax.set_title(f'Effect of CNN Conditioning - {model_name}\nTime: 0-{window_size} steps')
+        
+        # Add text annotations for values
+        text_annotations = []
+        for i in range(len(layers)):
+            text_row = []
+            for j in range(len(layers)):
+                text = ax.text(j, i, f'{diff_matrix[i, j]:.2f}',
+                             ha='center', va='center', 
+                             color='black' if abs(diff_matrix[i, j]) < 0.5 else 'white',
+                             fontsize=8)
+                text_row.append(text)
+            text_annotations.append(text_row)
+        
+        def update(frame):
+            # Compute difference for this frame
+            diff_matrix = uncond_matrices[frame] - cond_matrices[frame]
+            im.set_array(diff_matrix)
+            
+            # Update title
+            start_time = frame * stride
+            end_time = start_time + window_size
+            title.set_text(f'Effect of CNN Conditioning - {model_name}\nTime: {start_time}-{end_time} steps')
+            
+            # Update text annotations
+            for i in range(len(layers)):
+                for j in range(len(layers)):
+                    value = diff_matrix[i, j]
+                    text_annotations[i][j].set_text(f'{value:.2f}')
+                    text_annotations[i][j].set_color('black' if abs(value) < 0.5 else 'white')
+            
+            return [im, title] + [text for row in text_annotations for text in row]
+    
+    # Create animation
+    anim = FuncAnimation(fig, update, frames=len(cond_matrices), interval=200, blit=True)
+    
+    # Save as GIF
+    mode_suffix = 'comparison' if comparison_mode == 'side_by_side' else 'difference'
+    output_path = f'{output_dir}/conditional_{metric}_{mode_suffix}_{model_name}_animation.gif'
+    anim.save(output_path, writer=PillowWriter(fps=5))
+    plt.close()
+    
+    print(f"Animation saved to {output_path}")
+    
+    return output_path
+
+def create_cnn_influence_animation(layer_features, original_lengths, output_dir, model_name, 
+                                 window_size=20, stride=10):
+    """
+    Create animation showing how CNN influence (R²) changes over time.
+    """
+    cnn_output_layer = 'transformer_input'
+    if cnn_output_layer not in layer_features:
+        print(f"Warning: {cnn_output_layer} not found. Cannot analyze CNN influence.")
+        return None
+    
+    cnn_features = layer_features[cnn_output_layer]
+    
+    # Get transformer layers
+    layers = sorted([layer for layer in layer_features.keys() 
+                    if layer != cnn_output_layer and
+                    (layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11)],
+                   key=get_layer_number)
+    
+    # Get the minimum time steps
+    min_time_steps = min([features.shape[1] for features in layer_features.values()])
+    n_windows = (min_time_steps - window_size) // stride + 1
+    
+    # Store R² values for each window
+    r2_scores_over_time = []
+    
+    print(f"Computing CNN influence for {n_windows} time windows...")
+    
+    for window_idx in tqdm(range(n_windows), desc="Computing R² values"):
+        start_time = window_idx * stride
+        end_time = start_time + window_size
+        
+        r2_scores = []
+        
+        for layer in layers:
+            features = layer_features[layer][:, start_time:end_time, :]
+            cnn_window = cnn_features[:, start_time:end_time, :]
+            
+            # Ensure same batch size
+            min_batch = min(features.shape[0], cnn_window.shape[0])
+            features = features[:min_batch]
+            cnn_window = cnn_window[:min_batch]
+            
+            # Reshape to 2D
+            X = features.reshape(-1, features.shape[-1])
+            Z = cnn_window.reshape(-1, cnn_window.shape[-1])
+            
+            # Ensure same number of samples
+            min_samples = min(X.shape[0], Z.shape[0])
+            if min_samples < 2:
+                r2_scores.append(0.0)
+                continue
+            
+            X = X[:min_samples]
+            Z = Z[:min_samples]
+            
+            # Compute R² for each dimension
+            r2_per_dim = []
+            for dim in range(X.shape[1]):
+                try:
+                    reg = LinearRegression()
+                    reg.fit(Z, X[:, dim])
+                    r2 = reg.score(Z, X[:, dim])
+                    r2_per_dim.append(max(0, r2))  # Ensure non-negative
+                except:
+                    r2_per_dim.append(0.0)
+            
+            # Average R² across dimensions
+            avg_r2 = np.mean(r2_per_dim)
+            r2_scores.append(avg_r2)
+        
+        r2_scores_over_time.append(r2_scores)
+    
+    # Create animation
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Initial plot
+    line, = ax.plot(range(len(layers)), r2_scores_over_time[0], 'o-', linewidth=2, markersize=8)
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('R² (Variance Explained by CNN Output)')
+    ax.set_ylim(0, 1)
+    ax.set_xticks(range(len(layers)))
+    ax.set_xticklabels(layers, rotation=45, ha='right')
+    ax.grid(True, alpha=0.3)
+    
+    # Add title
+    title = ax.set_title(f'CNN Influence Decay - {model_name}\nTime: 0-{window_size} steps')
+    
+    # Add text annotations
+    texts = []
+    for i, r2 in enumerate(r2_scores_over_time[0]):
+        text = ax.annotate(f'{r2:.2f}', xy=(i, r2), xytext=(0, 5), 
+                          textcoords='offset points', ha='center', fontsize=8)
+        texts.append(text)
+    
+    def update(frame):
+        # Update line data
+        line.set_ydata(r2_scores_over_time[frame])
+        
+        # Update title
+        start_time = frame * stride
+        end_time = start_time + window_size
+        title.set_text(f'CNN Influence Decay - {model_name}\nTime: {start_time}-{end_time} steps')
+        
+        # Update text annotations
+        for i, (text, r2) in enumerate(zip(texts, r2_scores_over_time[frame])):
+            text.set_position((i, r2))
+            text.set_text(f'{r2:.2f}')
+        
+        return [line, title] + texts
+    
+    # Create animation
+    anim = FuncAnimation(fig, update, frames=n_windows, interval=200, blit=True)
+    
+    # Save as GIF
+    output_path = f'{output_dir}/cnn_influence_temporal_{model_name}_animation.gif'
+    anim.save(output_path, writer=PillowWriter(fps=5))
+    plt.close()
+    
+    print(f"Animation saved to {output_path}")
+    
+    return output_path
+
+
+
+# def main():
+
+    # parser = argparse.ArgumentParser(description="Visualize HuBERT features")
+    # parser.add_argument("--features_dir", type=str, 
+    #                   default="/home/sarcosh1/repos/layerwise-analysis/output/hubert-complete/librispeech_dev-clean_sample1",
+    #                   help="Directory containing feature .npz files")
+    # parser.add_argument("--output_dir", type=str,
+    #                   default="/home/sarcosh1/repos/layerwise-analysis/output/visualizations",
+    #                   help="Directory to save visualizations")
+    # parser.add_argument("--num_files", type=int, default=3,
+    #                   help="Number of audio files to analyze")
+    # parser.add_argument("--model_name", type=str, required=True,
+    #                   help="Name of the model architecture (e.g., 'HuBERT Base', 'HuBERT Large')")
+    # args = parser.parse_args()
+    
+    # # Create output directory
+    # Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # # Check if we have enough samples
+    # min_samples = 5  # Minimum samples needed for meaningful analysis
+    # if args.num_files < min_samples:
+    #     print(f"Warning: Number of files ({args.num_files}) is less than recommended minimum ({min_samples})")
+    #     print("Some visualizations may be skipped or may not be meaningful")
+    
+    # # Load features
+    # print("Loading features...")
+    # layer_features, original_lengths = load_features(args.features_dir, args.num_files)
+    
+    # # Check if CNN output layer exists
+    # cnn_output_layer = 'transformer_input'
+    # if cnn_output_layer not in layer_features:
+    #     print(f"Error: Required layer '{cnn_output_layer}' not found in features.")
+    #     print("Available layers:", list(layer_features.keys()))
+    #     return
+    
+    # # Generate original visualizations
+    # print("\nGenerating visualizations...")
+    
+    # # # Original unconditional similarity analysis
+    # # print("\nComputing unconditional layer similarities...")
+    # # plot_layer_similarity_improved(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    
+    # # NEW: Conditional similarity analysis
+    # print("\nComputing CNN-conditioned layer similarities...")
+    # try:
+    #     plot_conditional_layer_similarity(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    # except Exception as e:
+    #     print(f"Error in conditional similarity analysis: {e}")
+    #     print("Continuing with other analyses...")
+    
+    # # NEW: Analyze CNN influence decay
+    # print("\nAnalyzing CNN influence across layers...")
+    # try:
+    #     r2_scores = analyze_cnn_influence(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+    # except Exception as e:
+    #     print(f"Error in CNN influence analysis: {e}")
+    #     r2_scores = None
+    
+    # # # Original divergence analysis (for comparison)
+    # # print("\nAnalyzing feature divergence from CNN boundary...")
+    # # analyze_feature_divergence(layer_features, args.output_dir, args.model_name, args.num_files)
+    
+    # # # Add padding ratio visualization
+    # # print("\nGenerating padding ratio visualization...")
+    # # padding_ratios = plot_padding_ratios(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+
+    # # Print summary of CNN influence
+    # if r2_scores is not None:
+    #     print("\n=== CNN Influence Summary ===")
+    #     print(f"Average R² (CNN influence) by layer depth:")
+    #     layers = sorted([layer for layer in layer_features.keys() 
+    #                     if layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11],
+    #                    key=get_layer_number)
+    #     for i, (layer, r2) in enumerate(zip(layers, r2_scores)):
+    #         print(f"  {layer}: {r2:.3f} ({(1-r2)*100:.1f}% independent of CNN)")
+    #     print(f"\nOverall CNN influence decay: {r2_scores[0]:.3f} → {r2_scores[-1]:.3f}")
+    
+    # print("\nGenerating temporal animations...")
+    # temporal_similarities = compute_temporal_similarities(
+    #     layer_features, 
+    #     original_lengths,
+    #     window_size=20,
+    #     stride=10
+    # )
+    
+    # # Create animations for each metric
+    # for metric in ['cosine', 'correlation', 'cka']:
+    #     create_similarity_animation(temporal_similarities, args.output_dir, args.model_name, metric)
+    
+ 
+    
+    # print(f"\nAll visualizations saved to {args.output_dir}")
+
+
+# Update the main function to include conditional temporal animations
 def main():
+    """
+    Enhanced main function that includes conditional temporal animations.
+    """
     parser = argparse.ArgumentParser(description="Visualize HuBERT features")
     parser.add_argument("--features_dir", type=str, 
-                      default="/home/sarcosh1/repos/layerwise-analysis/output/hubert-complete/librispeech_dev-clean_sample1",
+                      default="/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
                       help="Directory containing feature .npz files")
     parser.add_argument("--output_dir", type=str,
                       default="/home/sarcosh1/repos/layerwise-analysis/output/visualizations",
@@ -1432,12 +1966,6 @@ def main():
     # Create output directory
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     
-    # Check if we have enough samples
-    min_samples = 5  # Minimum samples needed for meaningful analysis
-    if args.num_files < min_samples:
-        print(f"Warning: Number of files ({args.num_files}) is less than recommended minimum ({min_samples})")
-        print("Some visualizations may be skipped or may not be meaningful")
-    
     # Load features
     print("Loading features...")
     layer_features, original_lengths = load_features(args.features_dir, args.num_files)
@@ -1446,52 +1974,73 @@ def main():
     cnn_output_layer = 'transformer_input'
     if cnn_output_layer not in layer_features:
         print(f"Error: Required layer '{cnn_output_layer}' not found in features.")
-        print("Available layers:", list(layer_features.keys()))
         return
     
-    # Generate original visualizations
-    print("\nGenerating visualizations...")
-    
-    # # Original unconditional similarity analysis
-    # print("\nComputing unconditional layer similarities...")
-    # plot_layer_similarity_improved(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
-    
-    # NEW: Conditional similarity analysis
+    # Static conditional similarity analysis
     print("\nComputing CNN-conditioned layer similarities...")
     try:
-        plot_conditional_layer_similarity(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+        plot_conditional_layer_similarity(layer_features, original_lengths, args.output_dir, 
+                                        args.model_name, args.num_files)
     except Exception as e:
         print(f"Error in conditional similarity analysis: {e}")
-        print("Continuing with other analyses...")
     
-    # NEW: Analyze CNN influence decay
+    # Analyze CNN influence
     print("\nAnalyzing CNN influence across layers...")
     try:
-        r2_scores = analyze_cnn_influence(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
+        r2_scores = analyze_cnn_influence(layer_features, original_lengths, args.output_dir, 
+                                        args.model_name, args.num_files)
     except Exception as e:
         print(f"Error in CNN influence analysis: {e}")
         r2_scores = None
     
-    # # Original divergence analysis (for comparison)
-    # print("\nAnalyzing feature divergence from CNN boundary...")
-    # analyze_feature_divergence(layer_features, args.output_dir, args.model_name, args.num_files)
+    # Compute conditional temporal similarities
+    print("\nComputing conditional temporal similarities...")
+    conditional_temporal_sims = compute_conditional_temporal_similarities(
+        layer_features, 
+        original_lengths,
+        window_size=20,
+        stride=10
+    )
     
-    # # Add padding ratio visualization
-    # print("\nGenerating padding ratio visualization...")
-    # padding_ratios = plot_padding_ratios(layer_features, original_lengths, args.output_dir, args.model_name, args.num_files)
-
-    # Print summary of CNN influence
-    if r2_scores is not None:
-        print("\n=== CNN Influence Summary ===")
-        print(f"Average R² (CNN influence) by layer depth:")
-        layers = sorted([layer for layer in layer_features.keys() 
-                        if layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11],
-                       key=get_layer_number)
-        for i, (layer, r2) in enumerate(zip(layers, r2_scores)):
-            print(f"  {layer}: {r2:.3f} ({(1-r2)*100:.1f}% independent of CNN)")
-        print(f"\nOverall CNN influence decay: {r2_scores[0]:.3f} → {r2_scores[-1]:.3f}")
+    if conditional_temporal_sims is not None:
+        # Create animations for each conditional metric
+        print("\nGenerating conditional temporal animations...")
+        
+        # Partial correlation animations
+        create_conditional_similarity_animation(
+            conditional_temporal_sims, args.output_dir, args.model_name,
+            metric='partial_correlation', comparison_mode='side_by_side'
+        )
+        create_conditional_similarity_animation(
+            conditional_temporal_sims, args.output_dir, args.model_name,
+            metric='partial_correlation', comparison_mode='difference'
+        )
+        
+        # Conditional CKA (residual) animations
+        create_conditional_similarity_animation(
+            conditional_temporal_sims, args.output_dir, args.model_name,
+            metric='conditional_cka_residual', comparison_mode='side_by_side'
+        )
+        create_conditional_similarity_animation(
+            conditional_temporal_sims, args.output_dir, args.model_name,
+            metric='conditional_cka_residual', comparison_mode='difference'
+        )
+        
+        # Conditional CKA (partial) animations
+        create_conditional_similarity_animation(
+            conditional_temporal_sims, args.output_dir, args.model_name,
+            metric='conditional_cka_partial', comparison_mode='side_by_side'
+        )
+        
+        # CNN influence animation
+        print("\nGenerating CNN influence temporal animation...")
+        create_cnn_influence_animation(
+            layer_features, original_lengths, args.output_dir, args.model_name,
+            window_size=20, stride=10
+        )
     
-    print("\nGenerating temporal animations...")
+    # Original unconditional temporal animations (for comparison)
+    print("\nGenerating unconditional temporal animations...")
     temporal_similarities = compute_temporal_similarities(
         layer_features, 
         original_lengths,
@@ -1499,11 +2048,18 @@ def main():
         stride=10
     )
     
-    # Create animations for each metric
     for metric in ['cosine', 'correlation', 'cka']:
         create_similarity_animation(temporal_similarities, args.output_dir, args.model_name, metric)
     
- 
+    # Print summary
+    if r2_scores is not None:
+        print("\n=== CNN Influence Summary ===")
+        layers = sorted([layer for layer in layer_features.keys() 
+                        if layer.startswith('transformer_layer_') and int(layer.split('_')[-1]) <= 11],
+                       key=get_layer_number)
+        for i, (layer, r2) in enumerate(zip(layers, r2_scores)):
+            print(f"  {layer}: {r2:.3f} ({(1-r2)*100:.1f}% independent of CNN)")
+        print(f"\nOverall CNN influence decay: {r2_scores[0]:.3f} → {r2_scores[-1]:.3f}")
     
     print(f"\nAll visualizations saved to {args.output_dir}")
 
