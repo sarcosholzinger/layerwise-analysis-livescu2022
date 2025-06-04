@@ -15,8 +15,8 @@ source /opt/slurm_files/software/conda24/bin/activate e2e-layerwise
 mkdir -p logs
 
 # Set parameters
-FEATURES_DIR="/home/sarcosh1/repos/layerwise-analysis/output"
-OUTPUT_DIR="/home/sarcosh1/repos/layerwise-analysis/visualizations"
+FEATURES_DIR="/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1"
+OUTPUT_DIR="/home/sarcosh1/repos/layerwise-analysis/output/visualizations"
 MODEL_NAME="facebook_hubert-base-ls960"
 NUM_FILES=10
 
