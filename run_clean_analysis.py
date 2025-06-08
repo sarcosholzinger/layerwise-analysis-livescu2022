@@ -27,7 +27,7 @@ def example_basic_analysis():
     
     cmd = [
         "python", "visualize_features_clean.py",
-        "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/basic_padding",
         "--model_name", "HuBERT_Base_Padding",
         "--num_files", "3",
@@ -44,7 +44,7 @@ def example_segment_analysis():
     
     cmd = [
         "python", "visualize_features_clean.py",
-        "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/segment_middle",
         "--model_name", "HuBERT_Base_Segment",
         "--num_files", "5",
@@ -63,7 +63,7 @@ def example_conditional_analysis():
     
     cmd = [
         "python", "visualize_features_clean.py",
-        "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/conditional",
         "--model_name", "HuBERT_Base_Conditional",
         "--num_files", "3",
@@ -82,7 +82,7 @@ def example_temporal_analysis():
     
     cmd = [
         "python", "visualize_features_clean.py",
-        "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/temporal",
         "--model_name", "HuBERT_Base_Temporal",
         "--num_files", "3",
@@ -103,15 +103,105 @@ def example_full_analysis():
     
     cmd = [
         "python", "visualize_features_clean.py",
-        "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/full",
         "--model_name", "HuBERT_Base_Complete",
         "--num_files", "5",
         "--preprocessing", "pad",
         "--include_conditional",
         "--include_divergence",
+        "--include_input_propagation",
         "--window_size", "20",
         "--stride", "10"
+    ]
+    
+    return run_command(cmd)
+
+
+def example_input_propagation_analysis():
+    """Example: Input propagation analysis with GPU acceleration (Simple, Progressive Partial, and R² correlations)."""
+    print("\n=== Example 6: Input Propagation Analysis (GPU Accelerated) ===")
+    
+    cmd = [
+        "python", "visualize_features_clean.py",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
+        "--output_dir", "./output/clean_analysis/input_propagation",
+        "--model_name", "HuBERT_Input_Propagation",
+        "--num_files", "3",
+        "--preprocessing", "pad",
+        "--skip_basic",
+        "--skip_similarity", 
+        "--skip_temporal",
+        "--include_input_propagation",
+        "--use_gpu",
+        "--n_jobs", "-1"  # Use all CPU cores for parallel processing
+    ]
+    
+    return run_command(cmd)
+
+
+def example_all_correlations():
+    """Example: All correlation types with full GPU acceleration and performance optimization."""
+    print("\n=== Example 7: All Correlation Types (Full GPU + CPU Parallel) ===")
+    
+    cmd = [
+        "python", "visualize_features_clean.py",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
+        "--output_dir", "./output/clean_analysis/all_correlations",
+        "--model_name", "HuBERT_All_Correlations",
+        "--num_files", "3",
+        "--preprocessing", "pad",
+        "--skip_basic",
+        "--skip_temporal",
+        "--include_conditional",
+        "--include_input_propagation",
+        "--use_gpu",
+        "--n_jobs", "-1"
+    ]
+    
+    return run_command(cmd)
+
+
+def example_performance_benchmark():
+    """Example: Performance benchmark comparing GPU vs CPU-only processing."""
+    print("\n=== Example 8: Performance Benchmark (GPU vs CPU) ===")
+    
+    cmd = [
+        "python", "visualize_features_clean.py",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
+        "--output_dir", "./output/clean_analysis/performance_benchmark",
+        "--model_name", "HuBERT_Performance_Test",
+        "--num_files", "5",  # More files for better benchmarking
+        "--preprocessing", "pad",
+        "--skip_basic",
+        "--skip_temporal",
+        "--include_conditional",
+        "--include_input_propagation",
+        "--include_divergence",
+        "--use_gpu",
+        "--n_jobs", "-1"
+    ]
+    
+    return run_command(cmd)
+
+
+def example_cpu_only_comparison():
+    """Example: CPU-only processing for performance comparison."""
+    print("\n=== Example 9: CPU-Only Processing (For Comparison) ===")
+    
+    cmd = [
+        "python", "visualize_features_clean.py",
+        "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
+        "--output_dir", "./output/clean_analysis/cpu_only",
+        "--model_name", "HuBERT_CPU_Only",
+        "--num_files", "3",
+        "--preprocessing", "pad",
+        "--skip_basic",
+        "--skip_temporal",
+        "--include_conditional",
+        "--include_input_propagation",
+        "--no_gpu",  # Force CPU-only
+        "--n_jobs", "-1"
     ]
     
     return run_command(cmd)
@@ -126,11 +216,15 @@ def main():
     Path("./output/clean_analysis").mkdir(parents=True, exist_ok=True)
     
     examples = [
-        ("Basic Analysis", example_basic_analysis),
-        ("Segmentation Analysis", example_segment_analysis),
-        ("Conditional Analysis", example_conditional_analysis),
+        # ("Basic Analysis", example_basic_analysis),
+        # ("Segmentation Analysis", example_segment_analysis),
+        # ("Conditional Analysis", example_conditional_analysis),
         ("Temporal Analysis", example_temporal_analysis),
-        ("Full Analysis", example_full_analysis)
+        # ("Full Analysis", example_full_analysis),
+        ("Input Propagation Analysis", example_input_propagation_analysis),
+        ("All Correlation Types", example_all_correlations),
+        ("Performance Benchmark", example_performance_benchmark),
+        # ("CPU-Only Comparison", example_cpu_only_comparison)
     ]
     
     success_count = 0
@@ -140,9 +234,9 @@ def main():
             print(f"\n{'='*20} {name} {'='*20}")
             if example_func():
                 success_count += 1
-                print(f"✓ {name} completed successfully")
+                print(f" {name} completed successfully")
             else:
-                print(f"✗ {name} failed")
+                print(f" {name} failed")
         except Exception as e:
             print(f"✗ {name} failed with exception: {e}")
     
@@ -150,15 +244,19 @@ def main():
     print(f"Summary: {success_count}/{len(examples)} examples completed successfully")
     
     if success_count == len(examples):
-        print("🎉 All examples completed successfully!")
+        print("(^^) All examples completed successfully!")
         print("\nTo view results, check the following directories:")
         print("- ./output/clean_analysis/basic_padding/")
         print("- ./output/clean_analysis/segment_middle/")
         print("- ./output/clean_analysis/conditional/")
         print("- ./output/clean_analysis/temporal/")
         print("- ./output/clean_analysis/full/")
+        print("- ./output/clean_analysis/input_propagation/")
+        print("- ./output/clean_analysis/all_correlations/")
+        print("- ./output/clean_analysis/performance_benchmark/")
+        print("- ./output/clean_analysis/cpu_only/")
     else:
-        print("⚠️ Some examples failed. Check the error messages above.")
+        print("(!!) Some examples failed. Check the error messages above.")
 
 
 if __name__ == "__main__":
