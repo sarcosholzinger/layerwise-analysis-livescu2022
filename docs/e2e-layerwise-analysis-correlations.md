@@ -4,7 +4,7 @@ The current code implementation computes partial correlations between different 
 
 ## Three Different Analyses:
 
-1. Original Implementation (Layer-to-Layer Partial Correlations)
+1. Original Implementation (Test 0 - Layer-to-Layer Partial Correlations; regressing out CNN output)
 Uses linear regression for partial correlation.
 Removes CNN influence from both layers.
 
@@ -15,7 +15,7 @@ Purpose: Measures correlation between different layers after removing CNN influe
 Use case: Understanding layer-to-layer relationships independent of input signal. \
 Mathematical approach: Uses linear regression to "partial out" the CNN influence from both layers, then correlates the residuals.
 
-2. Simple Input-Layer Correlations (new function)
+2. Simple Input-Layer Correlations (Test 1 - Layer-output correlation to input (CNN output))
 Direct correlation between original input (Z) and each transformer layer. \
 Shows signal retention across layers. It aims to analyze how the original input correlates. with each layer as information propagates through the network. 
 
@@ -37,7 +37,7 @@ Expected Prediction: \
     3. Exponential decay pattern showing signal retention loss \
     4. Shows how much original signal remains in each layer 
 
-3. Progressive Partial Correlations (new function) 
+3. Progressive Partial Correlations (Test 2 - Layer-to-layer correlation controlling for previous layers outputs and initial input (CNN ouput at layer 0))
 Partial correlation between input and each layer, controlling for previous layers. \
 Shows NEW information each layer captures. 
 
@@ -76,6 +76,288 @@ These predictions align with the theoretical expectation that: \
     * Later layers transform information more abstractly \
     * Each layer adds progressively less new information about the original input 
 
+
+## Current Implementation Status - Similarity Metrics
+
+Sample import from `math_utils`
+
+``` python
+from _utils.math_utils import (
+    compute_partial_correlation, # Test 0 (CPU)
+    compute_input_layer_correlations, # Test 1 (multi-GPU)
+    compute_progressive_partial_correlations, # Test 2 (multi-GPU)
+    compute_r_squared, # Test 3 (CPU)
+    # compute_conditional_cka,
+    # compute_cosine_similarity,
+    # compute_cosine_similarity_gpu,
+    compute_cka, # Test 4 (CPU)
+    compute_cka_gpu, 
+    compute_cka_without_padding, # Test 5   
+    compute_cka_without_padding_gpu, 
+    analyze_input_propagation
+)
+```
+
+This section documents the current status of all similarity metric functions in the codebase, indicating which are active and which have been commented out during refactoring.
+
+### **ACTIVE METRICS (Currently Implemented)**
+
+#### **Core Similarity Metrics**
+
+1. **`compute_partial_correlation_gpu()`** - GPU partial correlation
+   - Location: `_utils/math_utils.py`, `gpu_layer_analysis.py`
+   - Purpose: GPU-accelerated partial correlation (Test 0 - GPU based)
+
+2. **`compute_partial_correlation()`** - CPU partial correlation
+   - Location: `_utils/math_utils.py`
+   - Purpose: Partial correlation controlling for third variable (Test 0 - CPU based)
+
+3. **`compute_input_layer_correlations()`** - Simple input-layer correlations
+   - Location: `_utils/math_utils.py`
+   - Purpose: Direct correlation between input and each layer (Test 1 - Multi-GPU/CPU)
+
+
+#### **Input Propagation Analysis**
+
+4. **`compute_progressive_partial_correlations()`** - Progressive partial correlations
+   - Location: `_utils/math_utils.py`
+   - Purpose: Shows NEW information each layer captures (Test 2 - Multi-GPU)
+
+5. **`compute_r_squared()`** - R² variance explanation
+    - Location: `_utils/math_utils.py`
+    - Purpose: Variance in X explained by Z
+
+##### CKA
+6. **`compute_cka()`** - Regular CKA computation (CPU)
+   - Location: `_utils/math_utils.py`
+   - Purpose: Centered Kernel Alignment between two representations
+   - Implementation details:
+     - Pure NumPy implementation
+     - Single-threaded CPU computation
+     - Straightforward implementation with no memory optimizations
+     - Steps:
+       1. Centers the input matrices (X, Y)
+       2. Computes Gram matrices using matrix multiplication
+       3. Centers the Gram matrices using centering matrix H
+       4. Computes HSIC and normalization terms
+       5. Returns final CKA score
+
+7. **`compute_cka_gpu()`** - GPU-accelerated CKA
+   - Location: `_utils/math_utils.py`
+   - Purpose: GPU-optimized CKA computation
+   - Implementation details:
+     - PyTorch-based GPU implementation
+     - Falls back to CPU if GPU unavailable
+     - Memory-efficient option with chunked computation
+     - Handles large matrices through adaptive chunking
+     - Cleans up GPU memory after computation
+
+8. **`compute_cka_without_padding()`** - Padding-aware CKA
+   - Location: `_utils/math_utils.py`
+   - Purpose: CKA computation excluding padded timesteps
+   - Implementation details:
+     - Handles batched sequence data
+     - Respects original sequence lengths
+     - Filters out padded timesteps before computation
+     - Ensures valid sample alignment between sequences
+
+9. **`compute_cka_gpu_optimized()`** - Memory-optimized GPU CKA
+   - Location: `gpu_layer_analysis.py`
+   - Purpose: Memory-efficient GPU CKA with chunking
+   - Implementation details:
+     - Part of GPUParallelSimilarity class
+     - Adaptive chunk size based on input dimensions
+     - Handles 3D input tensors (batch, time, features)
+     - Includes CPU fallback for error cases
+     - Optimized for V100 GPUs
+     - Memory-efficient computation for large matrices
+
+
+### CCA (TBA)
+#TODO: add details once implemented. Could borrow from submodules from Livescu et.al paper. 
+
+
+
+
+   
+
+##### Other
+10. **`compute_correlation_gpu()`** - GPU correlation
+   - Location: `gpu_layer_analysis.py`
+   - Purpose: Standard correlation with GPU acceleration (TODO: can probably remove from current analysis)
+
+
+#### **Temporal Analysis Functions**
+11. **`compute_temporal_similarities()`** - Regular temporal analysis
+    - Location: `_analysis/temporal_analysis.py`, `visualize_features.py`
+    - Purpose: Layer similarities across sliding windows
+
+12. **`compute_conditional_temporal_similarities()`** - Conditional temporal analysis
+    - Location: `_analysis/temporal_analysis.py`, `visualize_features.py`
+    - Purpose: Temporal analysis controlling for CNN output
+
+#### **High-Level Analysis Functions**
+13. **`compute_layer_similarities()`** - Main similarity analysis
+    - Location: `_analysis/similarity_analysis.py`
+    - Purpose: Orchestrates multiple similarity computations
+
+14. **`compute_input_propagation_similarities()`** - Input propagation wrapper
+    - Location: `_analysis/similarity_analysis.py`
+    - Purpose: Wrapper for all three input propagation analyses
+
+15. **`compute_all_similarities()`** - GPU parallel computation
+    - Location: `gpu_layer_analysis.py`
+    - Purpose: Parallel GPU-accelerated similarity computation
+
+
+### **!!COMMENTED OUT METRICS (Currently Disabled)**
+
+#### **Cosine Similarity (Refactoring)**
+1. **~~`compute_cosine_similarity()`~~** 
+   - Location: `_utils/math_utils.py` (lines 664-667)
+   - Reason: Not significant for our analysis
+
+2. **~~`compute_cosine_similarity_gpu()`~~**
+   - Location: `_utils/math_utils.py` (lines 668-736), `gpu_layer_analysis.py`
+   - Reason: Not significant for our analysis
+
+#### **Conditional CKA (Regression Issues)**
+3. **~~`compute_conditional_cka()`~~**
+   - Location: `_utils/math_utils.py` (lines 608-662), `visualize_features.py` (line 1046)
+   - Reason: Regression step issues in base implementation
+
+4. **~~`compute_conditional_cka_gpu()`~~**
+   - Location: `gpu_layer_analysis.py` (lines 335-344)
+   - Reason: Regression step issues in base implementation
+
+#### **Layer-to-Layer Correlations**
+5. **~~`compute_layer_to_layer_correlations()`~~**
+   - Location: `_utils/math_utils.py` (lines 1021-1066)
+   - Reason: Part of refactoring effort
+
+# Multi-GPU Support (#TODO: This may be removed -- not much benefit for the coding complexity!!)
+
+The `compute_input_layer_correlations` function now supports multi-GPU acceleration for faster computation of input-layer correlations across large numbers of layers.
+
+## Usage
+
+```python
+from _utils.math_utils import compute_input_layer_correlations, compute_progressive_partial_correlations
+
+# INPUT-LAYER CORRELATIONS
+# Use all available GPUs (default)
+correlations = compute_input_layer_correlations(
+    input_features, 
+    layer_features_dict, 
+    use_gpu=True
+)
+
+# Use specific number of GPUs
+correlations = compute_input_layer_correlations(
+    input_features, 
+    layer_features_dict, 
+    use_gpu=True,
+    n_gpus=2  # Use only 2 GPUs
+)
+
+# PROGRESSIVE PARTIAL CORRELATIONS
+# Multi-GPU accelerated internal computations
+partial_correlations = compute_progressive_partial_correlations(
+    input_features,
+    layer_features_dict,
+    use_gpu=True,
+    n_gpus=2  # Each partial correlation uses 2 GPUs internally
+)
+
+# Disable GPU usage (fallback to CPU parallelization)
+correlations = compute_input_layer_correlations(
+    input_features, 
+    layer_features_dict, 
+    use_gpu=False,
+    n_jobs=8  # Use 8 CPU cores instead
+)
+```
+
+## How Multi-GPU Works
+
+### Input-Layer Correlations
+1. **Layer Distribution**: Layers are distributed evenly across available GPUs
+2. **Parallel Processing**: Each GPU processes its assigned layers independently
+3. **Memory Management**: Automatic GPU memory cleanup after each layer computation
+4. **Fallback Strategy**: Graceful fallback to CPU if GPU computation fails
+
+### Progressive Partial Correlations
+1. **Sequential Structure**: Layers must be processed sequentially due to dependencies
+2. **Internal Parallelization**: Each partial correlation computation is parallelized across GPUs:
+   - GPU 0: Regresses conditioning variables from input features
+   - GPU 1: Regresses conditioning variables from current layer features
+   - GPU 0: Computes final correlation between residuals
+3. **Memory Efficiency**: Each GPU only holds data for its specific regression task
+4. **Robust Fallbacks**: Complete fallback chain with multiple levels:
+   - **Level 1**: Multi-GPU computation (if n_gpus > 1)
+   - **Level 2**: Single GPU computation (if multi-GPU fails)
+   - **Level 3**: CPU computation (if all GPU methods fail)
+   - **Automatic Detection**: Graceful fallback when GPUs unavailable
+
+## Performance Benefits
+
+- **Scalability**: Near-linear speedup with additional GPUs
+- **Memory Efficiency**: Each GPU only loads data for its assigned layers
+- **Robustness**: Individual GPU failures don't crash the entire computation
+
+## Requirements
+
+- PyTorch with CUDA support (optional - will fallback to CPU)
+- Multiple CUDA-capable GPUs (optional - will use fewer or fallback)
+- Sufficient GPU memory for layer features (will fallback if insufficient)
+
+
+## Fallback Scenarios
+
+The implementation automatically handles various failure scenarios:
+
+### No GPU Available
+```python
+# Automatically detects and uses CPU
+correlations = compute_progressive_partial_correlations(
+    input_features, layer_features_dict, use_gpu=True  # Will fallback to CPU
+)
+# Output: "CUDA not available, falling back to CPU"
+```
+
+### Insufficient GPUs
+```python
+# Requests 4 GPUs but only 2 available
+correlations = compute_progressive_partial_correlations(
+    input_features, layer_features_dict, use_gpu=True, n_gpus=4
+)
+# Output: "Using 2 GPUs for internal partial correlation computations"
+```
+
+### GPU Memory Exhausted
+```python
+# Individual GPU operations fail, fallback occurs automatically
+correlations = compute_progressive_partial_correlations(
+    large_input_features, large_layer_features_dict, use_gpu=True, n_gpus=2
+)
+# Output: "GPU 1 regression failed: CUDA out of memory, using scikit-learn"
+```
+
+### PyTorch Not Available
+```python
+# Automatically uses pure CPU implementation
+correlations = compute_progressive_partial_correlations(
+    input_features, layer_features_dict, use_gpu=True
+)
+# Output: "Using CPU for all partial correlation computations"
+```
+
+```
+
+
+----
+## Windowing and Correlation Analysis as a view of Similarity
+
 ## Temporal Analysis - Implementation (Needs review!!)
 
 The temporal analysis extends the static layer similarity analysis to examine how similarities evolve over time through sliding window approaches. This provides insights into the temporal dynamics of information processing across transformer layers.
@@ -92,7 +374,7 @@ compute_temporal_similarities(layer_features, original_lengths, window_size=10, 
 **Use case:** Understanding temporal dynamics of layer relationships. \
 **Mathematical approach:** 
 - Extract features for each time window (start_time:start_time+window_size)
-- Compute similarity metrics (correlation, CKA) for each window
+- Compute similarity metrics (correlation original, CKA) for each window !TODO: Requires CCA to be implemented
 - Return temporal evolution of similarity matrices
 
 **Key Features:**
@@ -317,303 +599,4 @@ create_conditional_similarity_animation(temporal_similarities, output_dir, model
 3. **Position effects:** Different similarities at sequence beginning vs. end
 4. **Conditional independence:** Varying CNN influence across temporal windows
 
-## Current Implementation Status - Similarity Metrics
 
-This section documents the current status of all similarity metric functions in the codebase, indicating which are active and which have been commented out during refactoring.
-
-### **ACTIVE METRICS (Currently Implemented)**
-
-#### **Core Similarity Metrics**
-
-1. **`compute_partial_correlation_gpu()`** - GPU partial correlation
-   - Location: `_utils/math_utils.py`, `gpu_layer_analysis.py`
-   - Purpose: GPU-accelerated partial correlation (Test 0 - GPU based)
-
-2. **`compute_partial_correlation()`** - CPU partial correlation
-   - Location: `_utils/math_utils.py`
-   - Purpose: Partial correlation controlling for third variable (Test 0 - CPU based)
-
-3. **`compute_input_layer_correlations()`** - Simple input-layer correlations
-   - Location: `_utils/math_utils.py`
-   - Purpose: Direct correlation between input and each layer (Test 1 - Multi-GPU/CPU)
-
-
-#### **Input Propagation Analysis**
-
-4. **`compute_progressive_partial_correlations()`** - Progressive partial correlations
-   - Location: `_utils/math_utils.py`
-   - Purpose: Shows NEW information each layer captures (Test 2 - Multi-GPU)
-
-5. **`compute_r_squared()`** - R² variance explanation
-    - Location: `_utils/math_utils.py`
-    - Purpose: Variance in X explained by Z
-
-##### CKA
-6. **`compute_cka()`** - Regular CKA computation (CPU)
-   - Location: `_utils/math_utils.py`
-   - Purpose: Centered Kernel Alignment between two representations
-   - Implementation details:
-     - Pure NumPy implementation
-     - Single-threaded CPU computation
-     - Straightforward implementation with no memory optimizations
-     - Steps:
-       1. Centers the input matrices (X, Y)
-       2. Computes Gram matrices using matrix multiplication
-       3. Centers the Gram matrices using centering matrix H
-       4. Computes HSIC and normalization terms
-       5. Returns final CKA score
-
-7. **`compute_cka_gpu()`** - GPU-accelerated CKA
-   - Location: `_utils/math_utils.py`
-   - Purpose: GPU-optimized CKA computation
-   - Implementation details:
-     - PyTorch-based GPU implementation
-     - Falls back to CPU if GPU unavailable
-     - Memory-efficient option with chunked computation
-     - Handles large matrices through adaptive chunking
-     - Cleans up GPU memory after computation
-
-8. **`compute_cka_without_padding()`** - Padding-aware CKA
-   - Location: `_utils/math_utils.py`
-   - Purpose: CKA computation excluding padded timesteps
-   - Implementation details:
-     - Handles batched sequence data
-     - Respects original sequence lengths
-     - Filters out padded timesteps before computation
-     - Ensures valid sample alignment between sequences
-
-9. **`compute_cka_gpu_optimized()`** - Memory-optimized GPU CKA
-   - Location: `gpu_layer_analysis.py`
-   - Purpose: Memory-efficient GPU CKA with chunking
-   - Implementation details:
-     - Part of GPUParallelSimilarity class
-     - Adaptive chunk size based on input dimensions
-     - Handles 3D input tensors (batch, time, features)
-     - Includes CPU fallback for error cases
-     - Optimized for V100 GPUs
-     - Memory-efficient computation for large matrices
-
-
-
-
-
-
-
-
-   
-
-##### Other
-10. **`compute_correlation_gpu()`** - GPU correlation
-   - Location: `gpu_layer_analysis.py`
-   - Purpose: Standard correlation with GPU acceleration (TODO: can probably remove from current analysis)
-
-
-#### **Temporal Analysis Functions**
-11. **`compute_temporal_similarities()`** - Regular temporal analysis
-    - Location: `_analysis/temporal_analysis.py`, `visualize_features.py`
-    - Purpose: Layer similarities across sliding windows
-
-12. **`compute_conditional_temporal_similarities()`** - Conditional temporal analysis
-    - Location: `_analysis/temporal_analysis.py`, `visualize_features.py`
-    - Purpose: Temporal analysis controlling for CNN output
-
-#### **High-Level Analysis Functions**
-13. **`compute_layer_similarities()`** - Main similarity analysis
-    - Location: `_analysis/similarity_analysis.py`
-    - Purpose: Orchestrates multiple similarity computations
-
-14. **`compute_input_propagation_similarities()`** - Input propagation wrapper
-    - Location: `_analysis/similarity_analysis.py`
-    - Purpose: Wrapper for all three input propagation analyses
-
-15. **`compute_all_similarities()`** - GPU parallel computation
-    - Location: `gpu_layer_analysis.py`
-    - Purpose: Parallel GPU-accelerated similarity computation
-
-### **!!COMMENTED OUT METRICS (Currently Disabled)**
-
-#### **Cosine Similarity (Refactoring)**
-1. **~~`compute_cosine_similarity()`~~** 
-   - Location: `_utils/math_utils.py` (lines 664-667)
-   - Reason: Not significant for our analysis
-
-2. **~~`compute_cosine_similarity_gpu()`~~**
-   - Location: `_utils/math_utils.py` (lines 668-736), `gpu_layer_analysis.py`
-   - Reason: Not significant for our analysis
-
-#### **Conditional CKA (Regression Issues)**
-3. **~~`compute_conditional_cka()`~~**
-   - Location: `_utils/math_utils.py` (lines 608-662), `visualize_features.py` (line 1046)
-   - Reason: Regression step issues in base implementation
-
-4. **~~`compute_conditional_cka_gpu()`~~**
-   - Location: `gpu_layer_analysis.py` (lines 335-344)
-   - Reason: Regression step issues in base implementation
-
-#### **Layer-to-Layer Correlations**
-5. **~~`compute_layer_to_layer_correlations()`~~**
-   - Location: `_utils/math_utils.py` (lines 1021-1066)
-   - Reason: Part of refactoring effort
-
-### ⚠️ **INCONSISTENCY ISSUES**
-
-#### **Default Metrics Lists vs. Worker Function Implementation**
-
-**Problem:** Default metrics lists include functions that are commented out in worker functions.
-
-**Example in `gpu_layer_analysis.py`:**
-```python
-# Default metrics list includes disabled functions:
-metrics = ['correlation', 'cka', 'partial_correlation', 'conditional_cka']
-
-# But worker functions have these commented out:
-# if 'partial_correlation' in metrics:  # COMMENTED OUT!
-# if 'conditional_cka' in metrics:      # COMMENTED OUT!
-```
-
-**Files Affected:**
-- `gpu_layer_analysis.py`: Lines 452, 1084
-- `gpu_temporal_layer_analysis.py`: Lines 51, 490, 672
-
-**Status After Fix:**
-- **Working metrics:** `['correlation', 'cka']`
-- **Listed metrics:** `['correlation', 'cka']` ✅ **NOW CONSISTENT**
-
-#### **Functional vs. Listed Metrics by File**
-
-| File | Listed Metrics | Actually Working | Issue |
-|------|----------------|------------------|-------|
-| `gpu_layer_analysis.py` | `['correlation', 'cka']` | `['correlation', 'cka']` | ✅ **FIXED** |
-| `gpu_temporal_layer_analysis.py` | `['correlation', 'cka']` | `['correlation', 'cka']` | ✅ Consistent |
-| `_analysis/similarity_analysis.py` | Dynamic based on function | `['correlation', 'cka']` + conditionals | ✅ Working |
-
-# Multi-GPU Support
-
-The `compute_input_layer_correlations` function now supports multi-GPU acceleration for faster computation of input-layer correlations across large numbers of layers.
-
-## Usage
-
-```python
-from _utils.math_utils import compute_input_layer_correlations, compute_progressive_partial_correlations
-
-# INPUT-LAYER CORRELATIONS
-# Use all available GPUs (default)
-correlations = compute_input_layer_correlations(
-    input_features, 
-    layer_features_dict, 
-    use_gpu=True
-)
-
-# Use specific number of GPUs
-correlations = compute_input_layer_correlations(
-    input_features, 
-    layer_features_dict, 
-    use_gpu=True,
-    n_gpus=2  # Use only 2 GPUs
-)
-
-# PROGRESSIVE PARTIAL CORRELATIONS
-# Multi-GPU accelerated internal computations
-partial_correlations = compute_progressive_partial_correlations(
-    input_features,
-    layer_features_dict,
-    use_gpu=True,
-    n_gpus=2  # Each partial correlation uses 2 GPUs internally
-)
-
-# Disable GPU usage (fallback to CPU parallelization)
-correlations = compute_input_layer_correlations(
-    input_features, 
-    layer_features_dict, 
-    use_gpu=False,
-    n_jobs=8  # Use 8 CPU cores instead
-)
-```
-
-## How Multi-GPU Works
-
-### Input-Layer Correlations
-1. **Layer Distribution**: Layers are distributed evenly across available GPUs
-2. **Parallel Processing**: Each GPU processes its assigned layers independently
-3. **Memory Management**: Automatic GPU memory cleanup after each layer computation
-4. **Fallback Strategy**: Graceful fallback to CPU if GPU computation fails
-
-### Progressive Partial Correlations
-1. **Sequential Structure**: Layers must be processed sequentially due to dependencies
-2. **Internal Parallelization**: Each partial correlation computation is parallelized across GPUs:
-   - GPU 0: Regresses conditioning variables from input features
-   - GPU 1: Regresses conditioning variables from current layer features
-   - GPU 0: Computes final correlation between residuals
-3. **Memory Efficiency**: Each GPU only holds data for its specific regression task
-4. **Robust Fallbacks**: Complete fallback chain with multiple levels:
-   - **Level 1**: Multi-GPU computation (if n_gpus > 1)
-   - **Level 2**: Single GPU computation (if multi-GPU fails)
-   - **Level 3**: CPU computation (if all GPU methods fail)
-   - **Automatic Detection**: Graceful fallback when GPUs unavailable
-
-## Performance Benefits
-
-- **Scalability**: Near-linear speedup with additional GPUs
-- **Memory Efficiency**: Each GPU only loads data for its assigned layers
-- **Robustness**: Individual GPU failures don't crash the entire computation
-
-## Requirements
-
-- PyTorch with CUDA support (optional - will fallback to CPU)
-- Multiple CUDA-capable GPUs (optional - will use fewer or fallback)
-- Sufficient GPU memory for layer features (will fallback if insufficient)
-
-## Example Performance
-
-```python
-# Single GPU: ~30 seconds for 12 layers
-# Dual GPU: ~16 seconds for 12 layers  
-# Quad GPU: ~8 seconds for 12 layers
-```
-
-## Fallback Scenarios
-
-The implementation automatically handles various failure scenarios:
-
-### No GPU Available
-```python
-# Automatically detects and uses CPU
-correlations = compute_progressive_partial_correlations(
-    input_features, layer_features_dict, use_gpu=True  # Will fallback to CPU
-)
-# Output: "CUDA not available, falling back to CPU"
-```
-
-### Insufficient GPUs
-```python
-# Requests 4 GPUs but only 2 available
-correlations = compute_progressive_partial_correlations(
-    input_features, layer_features_dict, use_gpu=True, n_gpus=4
-)
-# Output: "Using 2 GPUs for internal partial correlation computations"
-```
-
-### GPU Memory Exhausted
-```python
-# Individual GPU operations fail, fallback occurs automatically
-correlations = compute_progressive_partial_correlations(
-    large_input_features, large_layer_features_dict, use_gpu=True, n_gpus=2
-)
-# Output: "GPU 1 regression failed: CUDA out of memory, using scikit-learn"
-```
-
-### PyTorch Not Available
-```python
-# Automatically uses pure CPU implementation
-correlations = compute_progressive_partial_correlations(
-    input_features, layer_features_dict, use_gpu=True
-)
-# Output: "Using CPU for all partial correlation computations"
-```
-
-## Testing Fallbacks
-
-Run the test script to verify fallback behavior:
-```bash
-python test_cpu_fallback.py
-```
