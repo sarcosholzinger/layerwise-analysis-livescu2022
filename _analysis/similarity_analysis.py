@@ -446,7 +446,9 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
                                      propagation_results: Optional[Dict[str, Dict[str, float]]] = None,
                                      output_dir: str = "", model_name: str = "", num_files: int = 0,
                                      include_conditional: bool = False,
-                                     use_gpu_info: bool = True):
+                                     use_gpu_info: bool = True,
+                                     include_cosine: bool = False,
+                                     include_conditional_cka: bool = False):
     """
     Enhanced plotting function that combines layer-to-layer similarities with input propagation analyses.
     
@@ -458,6 +460,8 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
         num_files: Number of files processed
         include_conditional: Whether to include conditional plots
         use_gpu_info: Whether to include GPU performance information
+        include_cosine: Whether to include cosine similarity plots (if available)
+        include_conditional_cka: Whether to include conditional CKA plots (if available)
     """
     layers = similarity_results['layers']
     
@@ -478,11 +482,22 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
                     cbar_kws={'label': 'CKA'})
         axes[0, 1].set_title('Layer-to-Layer CKA', fontsize=14)
         
-        sns.heatmap(similarity_results['cosine'], ax=axes[0, 2],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=-1, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Cosine Similarity'})
-        axes[0, 2].set_title('Layer-to-Layer Cosine Similarity', fontsize=14)
+        # Plot cosine similarity if enabled and available
+        if include_cosine and 'cosine' in similarity_results:
+            sns.heatmap(similarity_results['cosine'], ax=axes[0, 2],
+                        xticklabels=layers, yticklabels=layers,
+                        cmap='viridis', vmin=-1, vmax=1, annot=True, fmt='.2f',
+                        cbar_kws={'label': 'Cosine Similarity'})
+            axes[0, 2].set_title('Layer-to-Layer Cosine Similarity', fontsize=14)
+        # Otherwise plot input propagation analysis
+        elif propagation_results:
+            simple_corrs = [propagation_results['simple_correlations'][l] for l in layers]
+            axes[0, 2].plot(range(len(layers)), simple_corrs, 'o-', color='blue')
+            axes[0, 2].set_xticks(range(len(layers)))
+            axes[0, 2].set_xticklabels(layers, rotation=45)
+            axes[0, 2].set_title('Input Signal Retention', fontsize=14)
+            axes[0, 2].set_ylabel('Correlation with Input')
+            axes[0, 2].grid(True, alpha=0.3)
         
         # Row 2: Conditional similarities
         sns.heatmap(similarity_results['conditional_correlation'], ax=axes[1, 0],
@@ -491,89 +506,22 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
                     cbar_kws={'label': 'Partial Correlation'})
         axes[1, 0].set_title('Conditional Correlation\n(CNN Influence Removed)', fontsize=14)
         
-        sns.heatmap(similarity_results['conditional_cka'], ax=axes[1, 1],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Conditional CKA'})
-        axes[1, 1].set_title('Conditional CKA\n(CNN Influence Removed)', fontsize=14)
-        
-        # Difference plot
-        diff_matrix = similarity_results['correlation'] - similarity_results['conditional_correlation']
-        sns.heatmap(diff_matrix, ax=axes[1, 2],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='RdBu_r', center=0, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Difference'})
-        axes[1, 2].set_title('Correlation Difference\n(Unconditional - Conditional)', fontsize=14)
-        
-        # Row 3: Input propagation analyses
-        if propagation_results:
-            layer_order = propagation_results.get('layer_order', [])
-            simple_corrs = propagation_results.get('simple_correlations', {})
-            partial_corrs = propagation_results.get('progressive_partial_correlations', {})
-            r2_values = propagation_results.get('r_squared_values', {})
-            
-            if layer_order:
-                layer_numbers = [int(layer.split('_')[-1]) for layer in layer_order]
-                simple_values = [simple_corrs.get(layer, 0) for layer in layer_order]
-                partial_values = [partial_corrs.get(layer, 0) for layer in layer_order]
-                r2_vals = [r2_values.get(layer, 0) for layer in layer_order]
-                
-                # Simple correlations
-                axes[2, 0].plot(layer_numbers, simple_values, 'o-', linewidth=2, color='blue')
-                axes[2, 0].set_title('Simple Input-Layer Correlations', fontsize=14)
-                axes[2, 0].set_xlabel('Layer')
-                axes[2, 0].set_ylabel('Correlation')
-                axes[2, 0].grid(True, alpha=0.3)
-                
-                # Progressive partial correlations
-                axes[2, 1].plot(layer_numbers, partial_values, 'o-', linewidth=2, color='orange')
-                axes[2, 1].set_title('Progressive Partial Correlations', fontsize=14)
-                axes[2, 1].set_xlabel('Layer')
-                axes[2, 1].set_ylabel('Partial Correlation')
-                axes[2, 1].grid(True, alpha=0.3)
-                
-                # R² analysis
-                axes[2, 2].plot(layer_numbers, r2_vals, 'o-', linewidth=2, color='green')
-                axes[2, 2].set_title('R² Analysis', fontsize=14)
-                axes[2, 2].set_xlabel('Layer')
-                axes[2, 2].set_ylabel('R²')
-                axes[2, 2].grid(True, alpha=0.3)
-        
-    elif include_conditional and 'conditional_correlation' in similarity_results:
-        # Create comparison plot with conditional vs unconditional (original functionality)
-        fig, axes = plt.subplots(2, 3, figsize=(24, 16))
-        
-        # Row 1: Unconditional metrics
-        sns.heatmap(similarity_results['correlation'], ax=axes[0, 0],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='RdBu_r', vmin=-1, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Correlation'})
-        axes[0, 0].set_title('Unconditional Correlation', fontsize=14)
-        
-        sns.heatmap(similarity_results['cka'], ax=axes[0, 1],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'CKA'})
-        axes[0, 1].set_title('Unconditional CKA', fontsize=14)
-        
-        sns.heatmap(similarity_results['cosine'], ax=axes[0, 2],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=-1, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Cosine Similarity'})
-        axes[0, 2].set_title('Cosine Similarity', fontsize=14)
-        
-        # Row 2: Conditional metrics
-        sns.heatmap(similarity_results['conditional_correlation'], ax=axes[1, 0],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='RdBu_r', vmin=-1, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Partial Correlation'})
-        axes[1, 0].set_title(f'Conditional Correlation\n(Conditioned on {similarity_results.get("cnn_layer", "CNN")})', fontsize=14)
-        
-        sns.heatmap(similarity_results['conditional_cka'], ax=axes[1, 1],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Conditional CKA'})
-        axes[1, 1].set_title(f'Conditional CKA\n(Conditioned on {similarity_results.get("cnn_layer", "CNN")})', fontsize=14)
+        # Plot conditional CKA if enabled and available
+        if include_conditional_cka and 'conditional_cka' in similarity_results:
+            sns.heatmap(similarity_results['conditional_cka'], ax=axes[1, 1],
+                        xticklabels=layers, yticklabels=layers,
+                        cmap='viridis', vmin=0, vmax=1, annot=True, fmt='.2f',
+                        cbar_kws={'label': 'Conditional CKA'})
+            axes[1, 1].set_title('Conditional CKA\n(CNN Influence Removed)', fontsize=14)
+        # Otherwise plot progressive partial correlations
+        elif propagation_results:
+            partial_corrs = [propagation_results['progressive_partial_correlations'][l] for l in layers]
+            axes[1, 1].plot(range(len(layers)), partial_corrs, 'o-', color='orange')
+            axes[1, 1].set_xticks(range(len(layers)))
+            axes[1, 1].set_xticklabels(layers, rotation=45)
+            axes[1, 1].set_title('New Information per Layer', fontsize=14)
+            axes[1, 1].set_ylabel('Partial Correlation')
+            axes[1, 1].grid(True, alpha=0.3)
         
         # Difference plot
         diff_matrix = similarity_results['correlation'] - similarity_results['conditional_correlation']
@@ -584,8 +532,9 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
         axes[1, 2].set_title('Correlation Difference\n(Unconditional - Conditional)', fontsize=14)
         
     else:
-        # Simple plot with just basic similarities (original functionality)
-        fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+        # Simple plot with just basic similarities
+        n_plots = 2 + (1 if include_cosine and 'cosine' in similarity_results else 0)
+        fig, axes = plt.subplots(1, n_plots, figsize=(8 * n_plots, 8))
         
         sns.heatmap(similarity_results['correlation'], ax=axes[0],
                     xticklabels=layers, yticklabels=layers,
@@ -599,28 +548,30 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
                     cbar_kws={'label': 'CKA'})
         axes[1].set_title('Layer CKA', fontsize=14)
         
-        sns.heatmap(similarity_results['cosine'], ax=axes[2],
-                    xticklabels=layers, yticklabels=layers,
-                    cmap='viridis', vmin=-1, vmax=1, annot=True, fmt='.2f',
-                    cbar_kws={'label': 'Cosine Similarity'})
-        axes[2].set_title('Cosine Similarity', fontsize=14)
+        # Add cosine similarity if enabled and available
+        if include_cosine and 'cosine' in similarity_results:
+            sns.heatmap(similarity_results['cosine'], ax=axes[2],
+                        xticklabels=layers, yticklabels=layers,
+                        cmap='viridis', vmin=-1, vmax=1, annot=True, fmt='.2f',
+                        cbar_kws={'label': 'Cosine Similarity'})
+            axes[2].set_title('Cosine Similarity', fontsize=14)
     
     # Add overall title and performance info
     title = f'Layer Similarity Analysis - {model_name} (n={num_files})'
-    if use_gpu_info and propagation_results and 'performance_info' in propagation_results:
-        perf_info = propagation_results['performance_info']
-        if perf_info.get('gpu_acceleration', False):
-            title += f" [GPU Accelerated]"
+    if use_gpu_info and 'performance_info' in similarity_results:
+        perf_info = similarity_results['performance_info']
+        title += f"\nGPU: {perf_info.get('gpu_acceleration', False)}, Jobs: {perf_info.get('parallel_jobs', 1)}"
     
-    fig.suptitle(title, fontsize=16, fontweight='bold')
+    fig.suptitle(title, fontsize=16, y=0.98)
     plt.tight_layout()
     
     # Save plot
     suffix = "_conditional" if include_conditional else ""
-    suffix += "_with_propagation" if propagation_results else ""
-    output_path = f"{output_dir}/enhanced_similarity_analysis{suffix}_{model_name}_n{num_files}.png"
+    suffix += "_with_cosine" if include_cosine else ""
+    suffix += "_with_conditional_cka" if include_conditional_cka else ""
+    output_path = f"{output_dir}/layer_similarity_analysis{suffix}_{model_name}_n{num_files}.png"
     save_figure(fig, output_path)
-    print(f"Saved enhanced similarity analysis to {output_path}")
+    print(f"Saved layer similarity analysis to {output_path}")
 
 
 # Keep the original function for backward compatibility
