@@ -12,9 +12,9 @@ from _utils.math_utils import (
     # compute_conditional_cka,  # Commented out due to regression step issues
     # compute_cosine_similarity, compute_cosine_similarity_gpu,  # Commented out as these functions are being refactored
     # NEW: Import the enhanced correlation analyses
-    compute_input_layer_correlations,
-    compute_progressive_partial_correlations,
-    compute_r_squared,
+    # compute_input_layer_correlations, #TODO: check if this can be added in this script as they are in math_utils.
+    # compute_progressive_partial_correlations,
+    # compute_r_squared,
     analyze_input_propagation,
     CorrelationAnalyzer
 )
@@ -138,7 +138,7 @@ def compute_layer_similarities(layer_features: Dict[str, np.ndarray],
                 # Method 2: Correlation
                 try:
                     correlation_matrix[i, j] = np.corrcoef(
-                        f1_avg_truncated.flatten(), f2_avg_truncated.flatten() #TODO: check if this is correct
+                        f1_avg_truncated.flatten(), f2_avg_truncated.flatten() #TODO: check if this is correct; is this duplicated in math_utils --> def analyze_input_propagation
                     )[0, 1]
                 except:
                     correlation_matrix[i, j] = 0.0
@@ -158,6 +158,7 @@ def compute_layer_similarities(layer_features: Dict[str, np.ndarray],
                     X = X[:min_samples]
                     Y = Y[:min_samples]
                     
+                    # Compute CKA
                     if use_gpu:
                         try:
                             cka_matrix[i, j] = compute_cka_gpu(X, Y, device='cuda')
@@ -302,8 +303,8 @@ def compute_input_propagation_similarities(layer_features: Dict[str, np.ndarray]
         # Compute all analyses
         results = analyzer.compute_all_analyses(show_progress=show_progress)
         
-        print(f"✓ Input propagation analysis completed")
-        print(f"  Performance info: {results.get('performance_info', {})}")
+        print(f" Input propagation analysis completed")
+        print(f" Performance info: {results.get('performance_info', {})}")
         
         return results
         
