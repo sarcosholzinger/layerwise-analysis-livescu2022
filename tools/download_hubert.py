@@ -36,11 +36,6 @@ STATUS:
     paths that may not align with current directory structure. The script downloads
     and verifies HuBERT model but may need path updates for current pipeline.
     
-    CONCERNS:
-    - Hardcoded paths point to '/home/sarcosh1/repos/layerwise-analysis/' 
-    - May be from initial project setup phase
-    - Current pipeline may use different model loading approach
-    
     TODO: Verify if this script is:
     - Still needed for model setup
     - Using correct paths for current environment  
