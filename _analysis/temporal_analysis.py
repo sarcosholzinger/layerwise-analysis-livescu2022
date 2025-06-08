@@ -92,7 +92,7 @@ def compute_temporal_similarities(layer_features: Dict[str, np.ndarray],
                     except:
                         correlation_matrix[i, j] = 0.0
                 
-                # Compute CKA
+                # Compute CKA #TODO: check the implementation of CKA and animations is correct
                 if layer1 in original_lengths and layer2 in original_lengths:
                     # Create temporary lengths for this window
                     temp_lens1 = []
@@ -121,6 +121,8 @@ def compute_temporal_similarities(layer_features: Dict[str, np.ndarray],
                         cka_matrix[i, j] = compute_cka(X[:min_samples], Y[:min_samples])
                     else:
                         cka_matrix[i, j] = 0.0
+
+                #TODO: add other metrics here (CCA, Test 1, Test 2, Test 3). Unsure if for the Tests it's captured in correlation_matrix?
         
         # Append matrices
         # cosine_matrices.append(cosine_matrix)  # Commented out as cosine similarity is being refactored
