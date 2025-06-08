@@ -91,7 +91,7 @@ def example_basic_analysis():
     print("\n=== Example 1: Basic Analysis (Padding) ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/basic_padding",
         "--model_name", "HuBERT_Base_Padding",
@@ -108,7 +108,7 @@ def example_segment_analysis():
     print("\n=== Example 2: Segmentation Analysis ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/segment_middle",
         "--model_name", "HuBERT_Base_Segment",
@@ -127,7 +127,7 @@ def example_conditional_analysis():
     print("\n=== Example 3: Conditional Analysis ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/conditional",
         "--model_name", "HuBERT_Base_Conditional",
@@ -146,7 +146,7 @@ def example_temporal_analysis():
     print("\n=== Example 4: Temporal Analysis ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/temporal",
         "--model_name", "HuBERT_Base_Temporal",
@@ -167,7 +167,7 @@ def example_full_analysis():
     print("\n=== Example 5: Full Analysis ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/full",
         "--model_name", "HuBERT_Base_Complete",
@@ -188,7 +188,7 @@ def example_input_propagation_analysis():
     print("\n=== Example 6: Input Propagation Analysis (GPU Accelerated) ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/input_propagation",
         "--model_name", "HuBERT_Input_Propagation",
@@ -210,7 +210,7 @@ def example_all_correlations():
     print("\n=== Example 7: All Correlation Types (Full GPU + CPU Parallel) ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/all_correlations",
         "--model_name", "HuBERT_All_Correlations",
@@ -232,7 +232,7 @@ def example_performance_benchmark():
     print("\n=== Example 8: Performance Benchmark (GPU vs CPU) ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/performance_benchmark",
         "--model_name", "HuBERT_Performance_Test",
@@ -255,7 +255,7 @@ def example_cpu_only_comparison():
     print("\n=== Example 9: CPU-Only Processing (For Comparison) ===")
     
     cmd = [
-        "python", "visualize_features_clean.py",
+        "python", "main_layerwise_analysis.py",
         "--features_dir", "./output/hubert_complete/librispeech_dev-clean_sample1",
         "--output_dir", "./output/clean_analysis/cpu_only",
         "--model_name", "HuBERT_CPU_Only",
@@ -286,9 +286,9 @@ def main():
         # ("Conditional Analysis", example_conditional_analysis),
         ("Temporal Analysis", example_temporal_analysis),
         # ("Full Analysis", example_full_analysis),
-        ("Input Propagation Analysis", example_input_propagation_analysis),
+        # ("Input Propagation Analysis", example_input_propagation_analysis),
         ("All Correlation Types", example_all_correlations),
-        ("Performance Benchmark", example_performance_benchmark),
+        # ("Performance Benchmark", example_performance_benchmark),
         # ("CPU-Only Comparison", example_cpu_only_comparison)
     ]
     

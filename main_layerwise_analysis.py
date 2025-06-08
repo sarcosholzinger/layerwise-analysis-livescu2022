@@ -278,7 +278,7 @@ def run_temporal_analysis(layer_features, original_lengths, args):
     
     # Create animations for each metric
     print("Generating temporal animations...")
-    for metric in ['correlation', 'cka']:  # Removed 'cosine' as it's currently commented out
+    for metric in ['correlation', 'cka']:
         create_similarity_animation(
             temporal_similarities, args.output_dir, args.model_name, metric
         )
@@ -308,6 +308,10 @@ def run_temporal_analysis(layer_features, original_lengths, args):
             create_conditional_similarity_animation(
                 conditional_temporal_sims, args.output_dir, args.model_name,
                 metric='conditional_cka', comparison_mode='side_by_side'
+            )
+            create_conditional_similarity_animation(
+                conditional_temporal_sims, args.output_dir, args.model_name,
+                metric='conditional_cka', comparison_mode='difference'
             )
     
     return temporal_similarities
