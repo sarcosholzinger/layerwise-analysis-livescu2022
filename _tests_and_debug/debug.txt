@@ -1,0 +1,45 @@
+#slurm allocate interactive session
+salloc -p gpu --mem 4G -c 2 --gres=gpu:v100:1 -t 01:00:00
+salloc -p gpu --nodelist=rack7n06 --mem 4G -c 2 --gres=gpu:v100:1 -t 01:00:00
+
+# Debugpy for layerwise analysis scripts
+python -m debugpy --listen 0.0.0.0:5678 main_layerwise_analysis.py 
+/home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/test_input_propagation.py
+/home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/e2e-layerwise/bin/python -m debugpy --listen 0.0.0.0:5678 --wait-for-client /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/run_clean_analysis.py
+
+----
+
+# Single GPU (safest, easiest to debug)
+python extract_features-HuBERT.py --single_gpu --audio_dir /path/to/audio --save_dir /path/to/output
+
+# Multi-GPU (faster)
+python extract_features-HuBERT.py --audio_dir /path/to/audio --save_dir /path/to/output
+
+# Limit number of GPUs
+python extract_features-HuBERT.py --max_gpus 2 --audio_dir /path/to/audio --save_dir /path/to/output
+
+----
+#find and kill any existing debugpy
+lsof -i :5678 | grep LISTEN
+
+#
+kill -9 4101675
+
+
+## finding python process and ending them
+1. Check all your Python processes:
+ps -u sholzinger -o pid,ppid,cmd | grep python
+
+2. Check for specific analysis scripts:
+ps aux | grep sholzinger | grep -E "(visualize|analysis|run_clean|debug)" | grep -v grep
+
+3. Check by script name:
+pgrep -f "visualize_features_clean.py"
+
+4. Real-time monitoring with top:
+htop -u sholzinger
+
+5. Kill a specific script if needed:
+pkill -f "script_name.py"  # Replace with actual script name
+
+
