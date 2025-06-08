@@ -48,7 +48,8 @@ class TemporalSimilarityAnalyzer:
                                     metrics: List[str] = None) -> Dict:
         """Compute similarities across sliding temporal windows."""
         if metrics is None:
-            metrics = ['cosine', 'correlation', 'cka']
+            # metrics = ['cosine', 'correlation', 'cka']  # Commented out as cosine similarity is being refactored
+            metrics = ['correlation', 'cka']
         
         # Filter and sort layers
         layers = sorted([layer for layer in layer_features.keys() 
@@ -223,27 +224,38 @@ class TemporalSimilarityAnalyzer:
                 
                 # Handle padding for this window
                 if layer1 in original_lengths and layer2 in original_lengths:
-                    features1_valid, features2_valid = TemporalSimilarityAnalyzer._extract_window_valid_features(
-                        features1, features2, original_lengths[layer1], original_lengths[layer2], start_time
-                    )
+                    features1_valid, features2_valid = TemporalSimilarityAnalyzer._extract_valid_features(
+                        features1, features2, original_lengths[layer1], original_lengths[layer2], time_average=True)
                 else:
                     features1_valid, features2_valid = features1, features2
                 
                 # Compute similarities
-                if 'cosine' in metrics:
-                    result['cosine'] = similarity_computer.compute_cosine_similarity_gpu(
-                        features1_valid, features2_valid
-                    )
+                # if 'cosine' in metrics:  # Commented out as cosine similarity is being refactored
+                #     try:
+                #         result['cosine'] = similarity_computer.compute_cosine_similarity_gpu(
+                #             features1_valid, features2_valid
+                #         )
+                #     except Exception as e:
+                #         logger.error(f"Error computing cosine similarity for {layer1}-{layer2}: {e}")
+                #         result['cosine'] = 0.0
                 
                 if 'correlation' in metrics:
-                    result['correlation'] = similarity_computer.compute_correlation_gpu(
-                        features1_valid, features2_valid
-                    )
+                    try:
+                        result['correlation'] = similarity_computer.compute_correlation_gpu(
+                            features1_valid, features2_valid
+                        )
+                    except Exception as e:
+                        logger.error(f"Error computing correlation for {layer1}-{layer2}: {e}")
+                        result['correlation'] = 0.0
                 
                 if 'cka' in metrics:
-                    result['cka'] = similarity_computer.compute_cka_gpu_optimized(
-                        features1_valid, features2_valid
-                    )
+                    try:
+                        result['cka'] = similarity_computer.compute_cka_gpu_optimized(
+                            features1_valid, features2_valid
+                        )
+                    except Exception as e:
+                        logger.error(f"Error computing CKA for {layer1}-{layer2}: {e}")
+                        result['cka'] = 0.0
                 
             except Exception as e:
                 logger.warning(f"Error in GPU worker {gpu_id} for {layer1}-{layer2}: {e}")
@@ -280,27 +292,38 @@ class TemporalSimilarityAnalyzer:
             
             # Handle padding for this window
             if layer1 in original_lengths and layer2 in original_lengths:
-                features1_valid, features2_valid = TemporalSimilarityAnalyzer._extract_window_valid_features(
-                    features1, features2, original_lengths[layer1], original_lengths[layer2], start_time
-                )
+                features1_valid, features2_valid = TemporalSimilarityAnalyzer._extract_valid_features(
+                    features1, features2, original_lengths[layer1], original_lengths[layer2], time_average=True)
             else:
                 features1_valid, features2_valid = features1, features2
             
             # Compute similarities
-            if 'cosine' in metrics:
-                result['cosine'] = similarity_computer.compute_cosine_similarity_gpu(
-                    features1_valid, features2_valid
-                )
+            # if 'cosine' in metrics:  # Commented out as cosine similarity is being refactored
+            #     try:
+            #         result['cosine'] = similarity_computer.compute_cosine_similarity_gpu(
+            #             features1_valid, features2_valid
+            #         )
+            #     except Exception as e:
+            #         logger.error(f"Error computing cosine similarity for {layer1}-{layer2}: {e}")
+            #         result['cosine'] = 0.0
             
             if 'correlation' in metrics:
-                result['correlation'] = similarity_computer.compute_correlation_gpu(
-                    features1_valid, features2_valid
-                )
+                try:
+                    result['correlation'] = similarity_computer.compute_correlation_gpu(
+                        features1_valid, features2_valid
+                    )
+                except Exception as e:
+                    logger.error(f"Error computing correlation for {layer1}-{layer2}: {e}")
+                    result['correlation'] = 0.0
             
             if 'cka' in metrics:
-                result['cka'] = similarity_computer.compute_cka_gpu_optimized(
-                    features1_valid, features2_valid
-                )
+                try:
+                    result['cka'] = similarity_computer.compute_cka_gpu_optimized(
+                        features1_valid, features2_valid
+                    )
+                except Exception as e:
+                    logger.error(f"Error computing CKA for {layer1}-{layer2}: {e}")
+                    result['cka'] = 0.0
             
         except Exception as e:
             logger.warning(f"Error in CPU worker for {layer1}-{layer2}: {e}")
@@ -310,44 +333,60 @@ class TemporalSimilarityAnalyzer:
         return result
     
     @staticmethod
-    def _extract_window_valid_features(features1: np.ndarray, features2: np.ndarray,
-                                     orig_lens1: List[int], orig_lens2: List[int],
-                                     start_time: int) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract valid features for a specific time window."""
+    def _extract_valid_features(features1: np.ndarray, features2: np.ndarray,
+                             orig_lens1: List[int], orig_lens2: List[int],
+                             time_average: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Extract valid (non-padded) features.
+        
+        Args:
+            features1, features2: Feature arrays (batch, time, dim)
+            orig_lens1, orig_lens2: Original lengths for each batch
+            time_average: If True, average over time dimension per batch
+        
+        Returns:
+            Extracted features (either concatenated or time-averaged)
+        """
         all_X = []
         all_Y = []
         
         batch_size = features1.shape[0]
-        window_size = features1.shape[1]
         
         for b in range(batch_size):
             # Get original length for this batch item
-            orig_len1 = orig_lens1[b] if b < len(orig_lens1) else float('inf')
-            orig_len2 = orig_lens2[b] if b < len(orig_lens2) else float('inf')
+            orig_len1 = orig_lens1[b] if b < len(orig_lens1) else features1.shape[1]
+            orig_len2 = orig_lens2[b] if b < len(orig_lens2) else features2.shape[1]
+            orig_len = min(orig_len1, orig_len2)  # Use minimum to ensure both are valid
             
-            # Adjust lengths for this window
-            valid_len1 = max(0, min(orig_len1 - start_time, window_size))
-            valid_len2 = max(0, min(orig_len2 - start_time, window_size))
-            valid_len = min(valid_len1, valid_len2)
-            
-            if valid_len > 0:
-                # Extract only valid time steps for this window
-                X = features1[b, :valid_len, :]
-                Y = features2[b, :valid_len, :]
+            if orig_len > 0:
+                # Extract only non-padded time steps
+                X = features1[b, :orig_len, :]  # (time, dim)
+                Y = features2[b, :orig_len, :]
                 
-                all_X.append(X)
-                all_Y.append(Y)
+                if time_average:
+                    # Average over time for this batch item
+                    all_X.append(X.mean(axis=0))  # (dim,)
+                    all_Y.append(Y.mean(axis=0))
+                else:
+                    # Keep all time steps
+                    all_X.append(X)
+                    all_Y.append(Y)
         
         if all_X and all_Y:
-            # Concatenate all valid samples
-            X = np.vstack(all_X)
-            Y = np.vstack(all_Y)
+            if time_average:
+                # Stack batch-averaged features
+                X = np.vstack(all_X)  # (batch, dim)
+                Y = np.vstack(all_Y)
+            else:
+                # Concatenate all valid samples
+                X = np.vstack(all_X)  # (total_valid_samples, dim)
+                Y = np.vstack(all_Y)
             
             # Ensure same number of samples
             min_samples = min(X.shape[0], Y.shape[0])
             return X[:min_samples], Y[:min_samples]
         else:
-            # Fallback to original features if extraction fails
+            # Return original features if extraction fails
             return features1, features2
 
 
@@ -359,6 +398,7 @@ class AnimationGenerator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def create_similarity_animation(self, temporal_results: Dict, model_name: str,
+                                # metric: str = 'correlation', fps: int = 5) -> str:
                                   metric: str = 'cosine', fps: int = 5) -> str:
         """Create animation showing similarity evolution over time."""
         if metric not in temporal_results['similarities']:
@@ -371,7 +411,7 @@ class AnimationGenerator:
         
         # Determine color map and range
         metric_configs = {
-            'cosine': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1},
+            # 'cosine': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1},
             'correlation': {'cmap': 'RdBu_r', 'vmin': -1, 'vmax': 1},
             'cka': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1}
         }
@@ -447,7 +487,8 @@ class AnimationGenerator:
                                             metrics: List[str] = None, fps: int = 5) -> str:
         """Create side-by-side comparison animation of multiple metrics."""
         if metrics is None:
-            metrics = ['cosine', 'correlation', 'cka']
+            # metrics = ['cosine', 'correlation', 'cka']
+            metrics = ['correlation', 'cka']
         
         # Filter available metrics
         available_metrics = [m for m in metrics if m in temporal_results['similarities']]
@@ -467,7 +508,7 @@ class AnimationGenerator:
         
         # Metric configurations
         metric_configs = {
-            'cosine': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1, 'title': 'Cosine Similarity'},
+            # 'cosine': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1, 'title': 'Cosine Similarity'},
             'correlation': {'cmap': 'RdBu_r', 'vmin': -1, 'vmax': 1, 'title': 'Correlation'},
             'cka': {'cmap': 'viridis', 'vmin': 0, 'vmax': 1, 'title': 'CKA'}
         }
@@ -628,7 +669,8 @@ class CompleteTemporalAnalysis:
                             create_animations: bool = True) -> Dict:
         """Run complete temporal similarity analysis."""
         if metrics is None:
-            metrics = ['cosine', 'correlation', 'cka']
+            # metrics = ['cosine', 'correlation', 'cka']  # Commented out as cosine similarity is being refactored
+            metrics = ['correlation', 'cka']
         
         logger.info("Starting temporal similarity analysis...")
         start_time = time.time()
@@ -714,7 +756,9 @@ def main():
                       help="Stride for sliding window")
     parser.add_argument("--n_gpus", type=int, default=None,
                       help="Number of GPUs to use (default: auto-detect)")
-    parser.add_argument("--metrics", nargs='+', default=['cosine', 'correlation', 'cka'],
+    parser.add_argument("--metrics", nargs='+',
+                      # default=['cosine', 'correlation', 'cka'],  # Commented out as cosine similarity is being refactored
+                      default=['correlation', 'cka'],
                       help="Similarity metrics to compute")
     parser.add_argument("--no_animations", action='store_true', default=False,
                       help="Skip animation generation")
