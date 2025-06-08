@@ -79,20 +79,7 @@ sys.path.append('.')
 
 from _utils.data_utils import load_features
 from _utils.visualization_utils import setup_plot_style, plot_feature_distributions, plot_layer_statistics, plot_padding_ratios
-from _utils.math_utils import (
-    compute_partial_correlation, 
-    compute_input_layer_correlations, 
-    compute_progressive_partial_correlations, 
-    compute_r_squared, 
-    # compute_conditional_cka,
-    # compute_cosine_similarity,
-    # compute_cosine_similarity_gpu,
-    # compute_cka,
-    # compute_cka_gpu,
-    # compute_cka_without_padding,
-    # compute_cka_without_padding_gpu,
-    analyze_input_propagation
-)
+
 from _analysis.similarity_analysis import (
     compute_layer_similarities, plot_similarity_matrices, analyze_feature_divergence,
     # NEW: Import the enhanced correlation analysis functions
@@ -210,14 +197,14 @@ def run_similarity_analysis(layer_features, original_lengths, args):
         )
         
         if propagation_results:
-            print("✓ Input propagation analysis completed successfully")
+            print("Input propagation analysis completed successfully")
             # Create separate detailed plot for propagation
             plot_input_propagation_correlations(
                 propagation_results, args.output_dir, args.model_name, args.num_files,
                 show_performance_info=True
             )
         else:
-            print("⚠ Input propagation analysis failed")
+            print("Input propagation analysis failed")
     
     # Enhanced plotting with both analyses
     print("Plotting enhanced similarity matrices...")
@@ -533,18 +520,23 @@ def main():
     propagation_results = None
     
     if not args.skip_basic:
+        print("Running basic analysis... (feature distributions, layer statistics, padding analysis)")
         run_basic_analysis(layer_features, original_lengths, args)
     
     if not args.skip_similarity:
+        print("Running similarity analysis... (layer-to-layer similarities, input propagation (CKA, correlation (old), partial correlation (old)), feature divergence)")
         similarity_results = run_similarity_analysis(layer_features, original_lengths, args)
     
     if args.include_conditional:
+        print("Running conditional analysis... (CNN influence)")
         r2_scores = run_conditional_analysis(layer_features, original_lengths, args)
     
     if args.include_input_propagation:
+        print("Running input propagation analysis... (simple, progressive partial (Test 1, 2, 3), and R² correlations) Excludes CCA")
         propagation_results = run_input_propagation_analysis(layer_features, original_lengths, args)
     
     if not args.skip_temporal:
+        print("Running temporal analysis... (temporal similarities, animations) Excludes CCA, Test 1, 2, 3.")
         temporal_results = run_temporal_analysis(layer_features, original_lengths, args)
     
     # Print summary
