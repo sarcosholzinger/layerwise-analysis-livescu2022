@@ -10,20 +10,25 @@ It provides an initial analysis of neural speech representations across all mode
 
 ```
 layerwise-analysis-cca-vis/
-├── utils/
+├── _utils/
 │   ├── data_utils.py          # Data loading & preprocessing (with segmentation option!)
 │   ├── math_utils.py          # Mathematical computations (CKA, correlation, etc.)
 │   └── visualization_utils.py # Basic plotting utilities
-├── analysis/
+├── _analysis/
 │   ├── similarity_analysis.py # Layer similarity analysis
 │   └── temporal_analysis.py   # Temporal dynamics & animations
 ├── extract/
-│   └── extract_features-HuBERT.py # Multi-GPU feature extraction
+│   ├── extract_features-HuBERT.py # Multi-GPU feature extraction
+│   ├── main_extract_features_chunked.py # Chunked processing for large datasets
 │   └── convert_flac_to_wav.sh     # Convert FLAC to WAV
-├── run_extract_features_chunked.py # Chunked processing for large datasets
-├── visualize_features_clean.py    # Clean main pipeline
-├── run_clean_analysis.py          # Usage examples
-└── .vscode/launch.json            # Debugging configurations
+├── main_layerwise_analysis.py     # Primary analysis pipeline
+├── main_gpu_analysis.py           # GPU-accelerated similarity analysis
+├── main_gpu_temporal_analysis.py  # GPU-accelerated temporal analysis
+├── main_layerwise_analysis_examples.py # Usage examples
+├── tools/                         # Setup and utility scripts
+├── _slurm/                        # SLURM job configurations
+├── _tests_and_debug/             # Testing and debugging utilities
+└── .vscode/launch.json           # Debugging configurations
 ```
 
 ## LibriSpeech Dataset
@@ -156,7 +161,7 @@ Built-in verification system ensures identical features across processing method
 - **Time Step Verification**: Validates CNN stride calculations
 - **Memory Consistency**: Ensures proper data type and memory layout
 
-----
+
 ## Usage Examples
 
 ### Single GPU Processing
@@ -176,33 +181,6 @@ python extract/extract_features-HuBERT.py \
     --save_dir /exp/sholzinger/output \
     --feature_type all \
     --dataset_split dev-clean
-```
-
-### Limit Number of GPUs
-```bash
-python extract/extract_features-HuBERT.py \
-    --audio_dir /exp/sholzinger/LibriSpeech/dev-clean \
-    --save_dir /exp/sholzinger/output \
-    --feature_type all \
-    --dataset_split dev-clean \
-    --max_gpus 2
-```
-
-### Chunked Processing for Large Datasets
-```bash
-python run_extract_features_chunked.py \
-    --audio_dir /exp/sholzinger/LibriSpeech/dev-clean \
-    --save_dir /exp/sholzinger/output \
-    --chunk_size 100 \
-    --feature_type all
-```
-
-### Performance Benchmarking
-```bash
-python benchmark_audio_loading.py \
-    --audio_dir /exp/sholzinger/LibriSpeech/dev-clean \
-    --num_files 50 \
-    --iterations 5
 ```
 
 ### Available Feature Types
@@ -225,7 +203,7 @@ python benchmark_audio_loading.py \
 ### Debug Configuration
 Updated `.vscode/launch.json` with:
 - Configurations for all main analysis scripts
-- Remote debugging support for SLURM allocated resources (rack7n06:5678)
+- Remote debugging support for SLURM allocated resources
 - Proper PYTHONPATH and environment setup
 
 ### Key Technical Improvements
@@ -233,13 +211,6 @@ Updated `.vscode/launch.json` with:
 2. **Deterministic Operations**: Set `torch.backends.cudnn.deterministic = True` for reproducible results
 3. **Memory Management**: Efficient memory handling with proper `.cpu()` calls and cleanup
 4. **Load Balancing**: Automatic distribution of audio files across available GPUs
-
-
-#### Processing Performance
-- **Single File**: ~2-5 seconds per file (varies with audio duration)
-- **Multi-GPU Speedup**: Near-linear scaling (4 GPUs ≈ 4x speedup)
-- **Memory Usage**: ~8GB VRAM per GPU for model + processing
-- **1,655 Files Processed**: Successfully completed on dev-clean sample
 
 ----
 ## Analysis Pipeline
@@ -262,7 +233,7 @@ python analysis/temporal_analysis.py
 
 ### 3. Visualization Pipeline
 ```bash
-python visualize_features_clean.py
+python main_layerwise_analysis.py
 ```
 - Clean visualization pipeline
 - Multiple plot types and formats
@@ -274,14 +245,14 @@ python visualize_features_clean.py
 ### Remote Debugging Setup
 1. Allocate SLURM resources:
    ```bash
-   salloc --gres=gpu:1 --time=4:00:00
+   salloc -p gpu --mem 4G -c 2 --gres=gpu:v100:1 -t 04:00:00
    ```
 
 2. Start debugpy server on allocated node:
    ```bash
-   /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/e2e-layerwise/bin/python \
+   ./layerwise-analysis-cca-vis/e2e-layerwise/bin/python \
    -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
-   /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/visualize_features_clean.py
+   ./layerwise-analysis-cca-vis/main_layerwise_analysis.py
    ```
 
 3. Connect from VS Code using "Remote Debug (rack7n06)" configuration
@@ -295,8 +266,8 @@ python visualize_features_clean.py
 - **Remote Debug (rack7n06)**: Connect to remote debugpy server
 
 ### Utility Scripts
-- **`benchmark_audio_loading.py`**: Compare FLAC vs WAV loading performance
-- **`run_extract_features_chunked.py`**: Process large datasets in manageable chunks
+- **`main_extract_features_chunked.py`**: Process large datasets in manageable chunks
+- **`main_layerwise_analysis_examples.py`**: Contains example usage patterns (demo-like)
 - **`debug.txt`**: Contains debugging commands and troubleshooting notes
 
 ## Output Structure
@@ -315,26 +286,6 @@ output/
     └── visualizations/
 ```
 
-## Quality Assurance & Error Handling
-
-### Feature Consistency Verification
-- **Shape Validation**: Automatic verification of feature dimensions
-- **Time Step Calculation**: Validates CNN stride computations (audio_length / 320)
-- **Memory Layout**: Ensures consistent numpy array formats
-- **Processing Resume**: Automatically skips already processed files
-
-### Error Recovery Features
-- **Per-File Error Logging**: Individual file failures don't stop processing
-- **GPU-Specific Tracking**: Separate error handling per GPU process
-- **Progress Monitoring**: Regular progress updates and completion summaries
-- **Memory Management**: Aggressive GPU cache clearing and garbage collection
-
-### Recent Improvements
-1. **Multi-GPU Parallelization**: Complete rewrite for efficient parallel processing
-2. **Feature Verification**: Added consistency checks for all feature types
-3. **File Naming**: Safe filename generation preserving directory structure
-4. **Debug Integration**: Enhanced VS Code debugging support with remote capabilities
-
 ## Dependencies
 
 ```bash
@@ -352,7 +303,7 @@ source e2e-layerwise/bin/activate
 
 # All dependencies should already be installed in the environment
 ```
-
+----
 ## Adding Future Contributions
 
 ### Current Main Pipeline Files
@@ -399,201 +350,3 @@ When adding new features or analysis methods:
 
 ----
 ## Recent Project Restructuring (June 2025)
-
-The following changes have been implemented and committed (Note these names below were not changed in the refactoring. Actual names for main scripts are outlined in the MAIN ENTRY point -section above- ):
-
-#### **Project Structure Update (New)**
-```
-layerwise-analysis-cca-vis/
-├── _utils/                    # Reorganized utilities (underscore prefix)
-│   ├── __init__.py
-│   ├── data_utils.py          # Data loading & preprocessing (323 lines)
-│   ├── math_utils.py          # Mathematical computations (1,508 lines)
-│   └── visualization_utils.py # Plotting utilities (483 lines)
-├── _analysis/                 # Reorganized analysis modules
-│   ├── __init__.py
-│   ├── similarity_analysis.py # Layer similarity analysis (741 lines)
-│   └── temporal_analysis.py   # Temporal dynamics & animations (508 lines)
-├── _slurm/                    # Reorganized SLURM job scripts
-│   ├── extract_hubert_features.slurm (55 lines)
-│   └── run_visualize_features.slurm (31 lines)
-├── extract/
-├── gpu_layer_analysis.py      # Updated with new imports and metric consistency
-├── gpu_temporal_layer_analysis.py # Updated temporal analysis
-├── visualize_features_clean.py    # Major enhancement with GPU acceleration
-├── run_clean_analysis.py          # Enhanced with new analysis examples
-└── .vscode/launch.json            # Updated debugging configurations
-```
-
-#### **Commit History Summary (13 commits)**
-
-##### **Documentation Enhancement (Commit 1)**
-**Hash**: `28754ca`
-- **Changes**: 506 insertions, 2 deletions in markdown files
-- **Details**: Comprehensive update to `e2e-layerwise-analysis-correlations.md` with:
-  - Detailed mathematical explanations for three analysis approaches
-  - Temporal analysis implementation details and windowing logic
-  - Complete similarity metrics status documentation
-  - Multi-GPU support documentation with usage examples
-  - Performance considerations and fallback scenarios
-
-##### **Directory Structure Cleanup (Commit 2)**
-**Hash**: `02d6042`
-- **Changes**: 1,648 deletions (9 files)
-- **Details**: Removed old directory structure files:
-  - Deleted `analysis/`, `utils/`, and `slurm/` directories
-  - Prepared for reorganization with underscore-prefixed directories
-
-##### **New Utilities Package (_utils/) (Commits 3-6)**
-
-**Commit 3** - `_utils/__init__.py` (Hash: `c4071d0`)
-- Initialize new utils package structure
-
-**Commit 4** - `_utils/data_utils.py` (Hash: `b9aec95`)
-- 323 lines of dataset handling, feature extraction, and batching functions
-
-**Commit 5** - `_utils/math_utils.py` (Hash: `e4701b7`)
-- **1,508 lines** of comprehensive mathematical utilities
-- **ACTIVE metrics**: partial correlation (CPU/GPU), input-layer correlations, progressive partial correlations, robust CPU fallbacks
-- **DISABLED metrics**: conditional CKA (regression issues), layer-to-layer correlations (refactoring), cosine similarity (not significant)
-- Multi-GPU acceleration support with automatic fallbacks
-
-**Commit 6** - `_utils/visualization_utils.py` (Hash: `8ebb46f`)
-- 483 lines of heatmap generation, similarity matrix plotting, temporal animation creation
-
-##### **New Analysis Package (_analysis/) (Commits 7-9)**
-
-**Commit 7** - `_analysis/__init__.py` (Hash: `44db17c`)
-- Initialize new analysis package structure
-
-**Commit 8** - `_analysis/similarity_analysis.py` (Hash: `03510ee`)
-- **741 lines** of layer-to-layer similarity computation
-- Input propagation analysis and orchestration of correlation, CKA, and partial correlation metrics
-- Excludes commented functions: conditional_cka, cosine_similarity variants, layer_to_layer_correlations
-
-**Commit 9** - `_analysis/temporal_analysis.py` (Hash: `6d013f8`)
-- **508 lines** of sliding window similarity computation
-- **Padding-aware** temporal dynamics with corrected time steps dimension handling
-- Conditional temporal analysis controlling for CNN output
-- **ACTIVE metrics**: correlation, cka, partial_correlation
-- **DISABLED**: conditional_cka (regression issues), cosine similarity (refactoring)
-
-##### **SLURM Scripts Reorganization (Commit 10)**
-**Hash**: `c875b2b`
-- **Changes**: 85 insertions (2 files)
-- Reorganized SLURM job scripts in `_slurm/` directory
-
-##### **Core Analysis Updates (Commits 11-13)**
-
-**Commit 11** - `gpu_layer_analysis.py` (Hash: `14b0be5`)
-- **Changes**: 226 insertions, 160 deletions
-- Fixed import paths to use `_utils` and `_analysis` packages
-- Updated default metrics to consistent `['correlation', 'cka']` list
-- Fixed inconsistency between listed and implemented metrics
-
-**Commit 12** - `gpu_temporal_layer_analysis.py` (Hash: `5e0c6b7`)
-- **Changes**: 98 insertions, 54 deletions
-- Import path fixes and metric consistency updates
-
-**Commit 13** - `run_clean_analysis.py` (Hash: `a5439f0`)
-- **Changes**: 111 insertions, 13 deletions
-- Fixed absolute paths to relative paths
-- **Added 4 new analysis examples**:
-  - `example_input_propagation_analysis()` - GPU-accelerated input propagation
-  - `example_all_correlations()` - Full GPU + CPU parallel analysis
-  - `example_performance_benchmark()` - GPU vs CPU performance comparison
-  - `example_cpu_only_comparison()` - CPU-only processing
-- **New CLI flags**: `--use_gpu`, `--no_gpu`, `--include_input_propagation`, `--n_jobs`
-
-##### **Major Feature Enhancement (Commit 14)**
-
-**Commit 14** - `visualize_features_clean.py` (Hash: `5141f01`)
-- **Changes**: 228 insertions, 76 deletions
-- **MAJOR ENHANCEMENT** with comprehensive new features:
-  - **GPU acceleration support** with CUDA detection and memory reporting
-  - **Input propagation analysis** with `CorrelationAnalyzer`
-  - **Enhanced similarity analysis** with new correlation types
-  - **Performance monitoring** and progress reporting
-  - **New CLI flags**: `--use_gpu`, `--no_gpu`, `--include_input_propagation`, `--n_jobs`
-  - Refactored CNN influence analysis with better error handling
-  - Updated author information (Sandra Arcos Holzinger, June 7, 2025)
-
-##### **Configuration Update (Commit 15)**
-**Hash**: `937f82b`
-- **Changes**: 24 insertions, 50 deletions
-- Updated VS Code debug configuration for new project structure
-
-### **Key Improvements Achieved**
-
-#### **1. Similarity Metrics Consistency**
-- **Fixed inconsistency** between listed metrics and actual implementations
-- **Active metrics**: `['correlation', 'cka']` in all GPU analysis functions
-- **Documented status** of disabled metrics with reasons
-
-#### **2. Enhanced Mathematical Capabilities**
-- **Multi-GPU acceleration** for input-layer correlations and progressive partial correlations
-- **Robust fallback system**: GPU → Single GPU → CPU
-- **Three analysis types**: layer-to-layer, input-layer, progressive partial correlations
-- **Performance optimization** with parallel processing
-
-#### **3. Temporal Analysis Improvements**
-- **Padding-aware computation** with corrected dimension handling
-- **Temporal windowing** fixed to use time steps dimension correctly
-- **Conditional analysis** controlling for CNN output
-- **Animation support** for temporal evolution visualization
-
-#### **4. Development Experience**
-- **Organized code structure** with underscore-prefixed packages
-- **Enhanced debugging** configurations for new structure
-- **Better error handling** and performance monitoring
-- **Comprehensive documentation** with usage examples
-
-#### **5. Performance & Usability**
-- **GPU acceleration** with automatic CUDA detection
-- **CPU parallelization** with configurable job counts
-- **Progress reporting** and performance benchmarking
-- **Multiple analysis workflows** with example scripts
-
-### **Current Similarity Metrics Status**
-
-#### **ACTIVE & WORKING**
-1. **`correlation`** - Pearson correlation between layers
-2. **`cka`** - Centered Kernel Alignment with padding support
-3. **`partial_correlation`** - Partial correlation controlling for CNN output
-4. **`input_layer_correlations`** - Direct correlation between input and layers
-5. **`progressive_partial_correlations`** - Progressive partial correlations showing new information per layer
-6. **`r_squared`** - Variance explanation analysis
-
-#### **DISABLED/COMMENTED OUT**
-1. ~~`conditional_cka`~~ - CKA controlling for variables (regression step issues)
-2. ~~`cosine_similarity`~~ - Cosine similarity variants (not significant for analysis)
-3. ~~`layer_to_layer_correlations`~~ - Layer-to-layer analysis (refactoring in progress)
-
-### **Usage Examples with New Structure**
-
-#### **GPU-Accelerated Input Propagation Analysis**
-```bash
-python visualize_features_clean.py \
-    --features_dir ./output/hubert_complete/librispeech_dev-clean_sample1 \
-    --output_dir ./output/clean_analysis/input_propagation \
-    --model_name HuBERT_Input_Propagation \
-    --num_files 5 \
-    --include_input_propagation \
-    --use_gpu \
-    --n_jobs -1
-```
-
-#### **Performance Benchmark (GPU vs CPU)**
-```bash
-python run_clean_analysis.py  # Runs example_performance_benchmark()
-```
-
-#### **All Correlation Types Analysis**
-```bash
-python visualize_features_clean.py \
-    --features_dir ./output/hubert_complete/librispeech_dev-clean_sample1 \
-    --output_dir ./output/clean_analysis/all_correlations \
-    --include_conditional \
-    --include_input_propagation \
-    --use_gpu
-```
