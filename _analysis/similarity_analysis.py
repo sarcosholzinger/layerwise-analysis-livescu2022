@@ -5,8 +5,8 @@ from tqdm import tqdm
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
-from utils.data_utils import filter_and_sort_layers
-from utils.math_utils import (
+from _utils.data_utils import filter_and_sort_layers
+from _utils.math_utils import (
     compute_cka, compute_cka_without_padding, compute_cka_gpu,
     compute_partial_correlation, compute_partial_correlation_gpu,
     # compute_conditional_cka,  # Commented out due to regression step issues
@@ -18,7 +18,7 @@ from utils.math_utils import (
     analyze_input_propagation,
     CorrelationAnalyzer
 )
-from utils.visualization_utils import save_figure
+from _utils.visualization_utils import save_figure
 
 
 def compute_layer_similarities(layer_features: Dict[str, np.ndarray], 

@@ -30,7 +30,7 @@ except ImportError:
     JOBLIB_AVAILABLE = False
 
 # Import the proper sorting function
-from utils.data_utils import get_layer_number
+from _utils.data_utils import get_layer_number
 
 
 def _setup_gpu_device(gpu_id: int = 0, memory_fraction: float = 0.9) -> str:
@@ -1238,7 +1238,7 @@ class CorrelationAnalyzer:
             gpu_id: GPU ID to use (for multi-GPU systems)
             n_jobs: Number of parallel CPU jobs
         """
-        from utils.data_utils import create_layer_analysis_config, preprocess_feature_pairs
+        from _utils.data_utils import create_layer_analysis_config, preprocess_feature_pairs
         
         self.layer_features = layer_features
         self.original_lengths = original_lengths

@@ -4,14 +4,14 @@ from tqdm import tqdm
 from matplotlib.animation import FuncAnimation, PillowWriter
 from typing import Dict, List, Optional
 
-from utils.data_utils import filter_and_sort_layers, get_layer_number
-from utils.math_utils import (
+from _utils.data_utils import filter_and_sort_layers, get_layer_number
+from _utils.math_utils import (
     compute_cka, compute_cka_without_padding, compute_cka_gpu,
     compute_partial_correlation, 
     # compute_conditional_cka,  # Commented out due to regression step issues
     # compute_cosine_similarity, compute_cosine_similarity_gpu,  # Commented out as these functions are being refactored
 )
-from utils.visualization_utils import save_figure
+from _utils.visualization_utils import save_figure
 
 
 def compute_temporal_similarities(layer_features: Dict[str, np.ndarray], 
@@ -139,7 +139,7 @@ def compute_temporal_similarities(layer_features: Dict[str, np.ndarray],
 
 def create_similarity_animation(temporal_similarities: Dict[str, List[np.ndarray]], 
                                output_dir: str, model_name: str, 
-                               metric: str = 'cosine') -> str:
+                               metric: str = 'correlation') -> str:
     """
     Create an animation showing how similarities evolve over time.
     
@@ -147,7 +147,7 @@ def create_similarity_animation(temporal_similarities: Dict[str, List[np.ndarray
         temporal_similarities: Output from compute_temporal_similarities
         output_dir: Directory to save animation
         model_name: Model name for filename
-        metric: Which metric to animate ('cosine', 'correlation', 'cka')
+        metric: Which metric to animate ('correlation', 'cka')
     
     Returns:
         Path to saved animation
