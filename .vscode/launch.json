@@ -11,45 +11,28 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             }
-        },
+        },      
+
         {
-            "name": "HuBERT Analysis",
+            "name": "Debug: Test Input Propagation",
             "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/visualize_features.py",
-            "args": [
-                "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
-                "--output_dir", "/home/sarcosh1/repos/layerwise-analysis/output/visualizations",
-                "--num_files", "10",
-                "--model_name", "HuBERT-Base"
+            "request": "attach",
+            "connect": {
+                "host": "rack7n06",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis"
+                }
             ],
-            "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             }
         },
-        {
-            "name": "HuBERT Complete Feature Extraction",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/extract_features-HuBERT.py",
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "args": [
-                "--model_name", "facebook/hubert-base-ls960",
-                "--data_sample", "1",
-                "--feature_type", "all",
-                "--span", "frame",
-                "--subset_id", "0",
-                "--dataset_split", "dev-clean",
-                "--save_dir", "/home/sarcosh1/repos/layerwise-analysis/output",
-                "--audio_dir", "/home/sarcosh1/repos/layerwise-analysis/content/data/LibriSpeech/dev-clean-2"
-            ]
-        },
+
         {
             "name": "HuBERT Conditional Analysis",
             "type": "python",
@@ -68,34 +51,25 @@
                 "PYTHONNODEBUGRANGES": "1"
             }
         },
+
         {
-            "name": "HuBERT Conditional Analysis (Large)",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/visualize_features.py",
-            "args": [
-                "--features_dir", "/home/sarcosh1/repos/layerwise-analysis/output/hubert_complete/librispeech_dev-clean_sample1",
-                "--output_dir", "/home/sarcosh1/repos/layerwise-analysis/output/visualizations",
-                "--num_files", "10",
-                "--model_name", "HuBERT Large"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "Attach to Process",
+            "name": "Remote Debug (rack7n06)",
             "type": "python",
             "request": "attach",
             "connect": {
-                "host": "c09",
+                "host": "rack7n06",//"c09",
                 "port": 5678
             },
             "pathMappings": [
                 {
                     "localRoot": "${workspaceFolder}",
-                    "remoteRoot": "/home/sarcosh1/repos/layerwise-analysis"
+                    "remoteRoot": "/home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis"
                 }
-            ]
+            ],
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
     ]
 }
