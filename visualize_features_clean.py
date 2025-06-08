@@ -21,9 +21,9 @@ import sys
 # Add utils and analysis modules to path
 sys.path.append('.')
 
-from utils.data_utils import load_features
-from utils.visualization_utils import setup_plot_style, plot_feature_distributions, plot_layer_statistics, plot_padding_ratios
-from utils.math_utils import (
+from _utils.data_utils import load_features
+from _utils.visualization_utils import setup_plot_style, plot_feature_distributions, plot_layer_statistics, plot_padding_ratios
+from _utils.math_utils import (
     compute_partial_correlation, 
     compute_input_layer_correlations, 
     compute_progressive_partial_correlations, 
@@ -37,13 +37,13 @@ from utils.math_utils import (
     # compute_cka_without_padding_gpu,
     analyze_input_propagation
 )
-from analysis.similarity_analysis import (
+from _analysis.similarity_analysis import (
     compute_layer_similarities, plot_similarity_matrices, analyze_feature_divergence,
     # NEW: Import the enhanced correlation analysis functions
     compute_input_propagation_similarities, plot_input_propagation_correlations,
     plot_enhanced_similarity_matrices
 )
-from analysis.temporal_analysis import (
+from _analysis.temporal_analysis import (
     compute_temporal_similarities, create_similarity_animation,
     compute_conditional_temporal_similarities, create_conditional_similarity_animation
 )
@@ -55,8 +55,8 @@ def analyze_cnn_influence(layer_features, original_lengths, output_dir, model_na
     """
     try:
         # Use the new unified analyzer
-        from utils.math_utils import CorrelationAnalyzer
-        from utils.visualization_utils import create_correlation_plot, save_figure
+        from _utils.math_utils import CorrelationAnalyzer
+        from _utils.visualization_utils import create_correlation_plot, save_figure
         
         # Initialize analyzer  
         analyzer = CorrelationAnalyzer(
@@ -222,7 +222,7 @@ def run_temporal_analysis(layer_features, original_lengths, args):
     
     # Create animations for each metric
     print("Generating temporal animations...")
-    for metric in ['cosine', 'correlation', 'cka']:
+    for metric in ['correlation', 'cka']:  # Removed 'cosine' as it's currently commented out
         create_similarity_animation(
             temporal_similarities, args.output_dir, args.model_name, metric
         )
@@ -263,8 +263,8 @@ def run_input_propagation_analysis(layer_features, original_lengths, args):
     
     try:
         # Use the new unified analyzer
-        from utils.math_utils import CorrelationAnalyzer
-        from utils.visualization_utils import (
+        from _utils.math_utils import CorrelationAnalyzer
+        from _utils.visualization_utils import (
             create_analysis_summary_plot, 
             create_correlation_plot, 
             create_bar_plot, 
@@ -354,7 +354,7 @@ def print_summary(layer_features, r2_scores, args):
         print(f"Segment strategy: {args.segment_strategy}")
     
     # Layer information using new utilities
-    from utils.data_utils import create_layer_analysis_config
+    from _utils.data_utils import create_layer_analysis_config
     config = create_layer_analysis_config(layer_features)
     print(f"Layers analyzed: {config['layer_count']} ({config['all_layers'][0]} to {config['all_layers'][-1]})")
     
