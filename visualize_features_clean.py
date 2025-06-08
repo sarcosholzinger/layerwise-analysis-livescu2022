@@ -5,12 +5,12 @@ Clean, modular feature visualization pipeline for HuBERT model analysis.
 This script provides a comprehensive analysis pipeline with the following features:
 1. Flexible data preprocessing (padding vs segmentation)
 2. Multiple similarity metrics and visualizations
-3. Conditional analysis (CNN influence)
+3. Conditional analysis (CNN influence) and other partial correlation analyses (simple, progressive, and R²)
 4. Temporal dynamics analysis with animations
 5. Modular, well-organized code structure
 
-Author: [Your name]
-Date: [Current date]
+Author: Sandra Arcos Holzinger
+Date: June 7, 2025
 """
 
 import argparse
@@ -23,8 +23,26 @@ sys.path.append('.')
 
 from utils.data_utils import load_features
 from utils.visualization_utils import setup_plot_style, plot_feature_distributions, plot_layer_statistics, plot_padding_ratios
-from utils.math_utils import compute_r_squared
-from analysis.similarity_analysis import compute_layer_similarities, plot_similarity_matrices, analyze_feature_divergence
+from utils.math_utils import (
+    compute_partial_correlation, 
+    compute_input_layer_correlations, 
+    compute_progressive_partial_correlations, 
+    compute_r_squared, 
+    # compute_conditional_cka,
+    # compute_cosine_similarity,
+    # compute_cosine_similarity_gpu,
+    # compute_cka,
+    # compute_cka_gpu,
+    # compute_cka_without_padding,
+    # compute_cka_without_padding_gpu,
+    analyze_input_propagation
+)
+from analysis.similarity_analysis import (
+    compute_layer_similarities, plot_similarity_matrices, analyze_feature_divergence,
+    # NEW: Import the enhanced correlation analysis functions
+    compute_input_propagation_similarities, plot_input_propagation_correlations,
+    plot_enhanced_similarity_matrices
+)
 from analysis.temporal_analysis import (
     compute_temporal_similarities, create_similarity_animation,
     compute_conditional_temporal_similarities, create_conditional_similarity_animation
@@ -35,64 +53,42 @@ def analyze_cnn_influence(layer_features, original_lengths, output_dir, model_na
     """
     Analyze how much each layer's representation is influenced by the CNN output.
     """
-    from utils.data_utils import filter_and_sort_layers
-    from utils.visualization_utils import save_figure
-    import matplotlib.pyplot as plt
-    
-    cnn_output_layer = 'transformer_input'
-    if cnn_output_layer not in layer_features:
-        print(f"Warning: {cnn_output_layer} not found. Skipping CNN influence analysis.")
+    try:
+        # Use the new unified analyzer
+        from utils.math_utils import CorrelationAnalyzer
+        from utils.visualization_utils import create_correlation_plot, save_figure
+        
+        # Initialize analyzer  
+        analyzer = CorrelationAnalyzer(
+            layer_features, 
+            original_lengths, 
+            cnn_layer='transformer_input', 
+            max_layer=11
+        )
+        
+        # Compute R² analysis
+        r2_results = analyzer.compute_r_squared_analysis()
+        
+        # Get layers and values in order
+        layers = analyzer.config['transformer_layer_names']
+        r2_scores = [r2_results[layer] for layer in layers]
+        
+        # Create plot using utility function
+        fig = create_correlation_plot(
+            r2_scores, layers,
+            f'CNN Influence Decay Across Transformer Layers - {model_name}',
+            'R² (Variance Explained by CNN Output)',
+            color='green',
+            ylim=(0, 1)
+        )
+        
+        save_figure(fig, f'{output_dir}/cnn_influence_decay_{model_name}_n{num_files}.png')
+        
+        return r2_scores
+        
+    except Exception as e:
+        print(f"Warning: {e}. Skipping CNN influence analysis.")
         return None
-    
-    cnn_features = layer_features[cnn_output_layer]
-    
-    # Get all transformer layers
-    layers = filter_and_sort_layers(layer_features)
-    layers = [l for l in layers if l != cnn_output_layer]  # Exclude CNN layer itself
-    
-    # Compute R² values showing how much variance in each layer is explained by CNN output
-    r2_scores = []
-    
-    for layer in layers:
-        features = layer_features[layer]
-        
-        # Ensure same batch size
-        min_batch = min(features.shape[0], cnn_features.shape[0])
-        features = features[:min_batch]
-        cnn_batch = cnn_features[:min_batch]
-        
-        # Reshape to 2D
-        X = features.reshape(-1, features.shape[-1])
-        Z = cnn_batch.reshape(-1, cnn_batch.shape[-1])
-        
-        # Ensure same number of samples
-        min_samples = min(X.shape[0], Z.shape[0])
-        X = X[:min_samples]
-        Z = Z[:min_samples]
-        
-        # Compute R²
-        r2 = compute_r_squared(X, Z)
-        r2_scores.append(r2)
-    
-    # Plot R² decay
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(range(len(layers)), r2_scores, 'o-', linewidth=2, markersize=8)
-    ax.set_xlabel('Layer')
-    ax.set_ylabel('R² (Variance Explained by CNN Output)')
-    ax.set_title(f'CNN Influence Decay Across Transformer Layers - {model_name}')
-    ax.set_xticks(range(len(layers)))
-    ax.set_xticklabels(layers, rotation=45, ha='right')
-    ax.grid(True, alpha=0.3)
-    
-    # Add text annotations for R² values
-    for i, r2 in enumerate(r2_scores):
-        ax.annotate(f'{r2:.3f}', xy=(i, r2), xytext=(0, 5), 
-                   textcoords='offset points', ha='center', fontsize=8)
-    
-    plt.tight_layout()
-    save_figure(fig, f'{output_dir}/cnn_influence_decay_{model_name}_n{num_files}.png')
-    
-    return r2_scores
 
 
 def run_basic_analysis(layer_features, original_lengths, args):
@@ -114,21 +110,75 @@ def run_basic_analysis(layer_features, original_lengths, args):
 
 
 def run_similarity_analysis(layer_features, original_lengths, args):
-    """Run layer similarity analysis."""
-    print("\n=== Running Similarity Analysis ===")
+    """Enhanced layer similarity analysis with GPU acceleration and new correlation types."""
+    print("\n=== Running Enhanced Similarity Analysis ===")
     
-    # Basic similarity analysis
-    print("Computing layer similarities...")
+    # Check for GPU availability and user preferences
+    use_gpu = getattr(args, 'use_gpu', True)
+    n_jobs = getattr(args, 'n_jobs', -1)
+    
+    if use_gpu:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                print(f"✓ Using GPU acceleration: {torch.cuda.get_device_name(0)}")
+                print(f"  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+            else:
+                print("GPU not available, using CPU with parallel processing")
+                use_gpu = False
+        except ImportError:
+            print("PyTorch not available, using CPU with parallel processing")
+            use_gpu = False
+    
+    print(f"  CPU jobs: {n_jobs} {'(all cores)' if n_jobs == -1 else ''}")
+    
+    # Basic layer-to-layer similarity analysis with acceleration
+    print("Computing enhanced layer similarities...")
     similarity_results = compute_layer_similarities(
         layer_features, original_lengths, 
-        include_conditional=args.include_conditional
+        include_conditional=args.include_conditional,
+        use_gpu=use_gpu,
+        n_jobs=n_jobs
     )
     
-    print("Plotting similarity matrices...")
-    plot_similarity_matrices(
-        similarity_results, args.output_dir, args.model_name, args.num_files,
-        include_conditional=args.include_conditional
+    # Input propagation analysis (NEW)
+    propagation_results = None
+    if args.include_input_propagation:
+        print("Computing input propagation correlations...")
+        propagation_results = compute_input_propagation_similarities(
+            layer_features, original_lengths,
+            cnn_layer='transformer_input',
+            use_gpu=use_gpu,
+            n_jobs=n_jobs,
+            show_progress=True
+        )
+        
+        if propagation_results:
+            print("✓ Input propagation analysis completed successfully")
+            # Create separate detailed plot for propagation
+            plot_input_propagation_correlations(
+                propagation_results, args.output_dir, args.model_name, args.num_files,
+                show_performance_info=True
+            )
+        else:
+            print("⚠ Input propagation analysis failed")
+    
+    # Enhanced plotting with both analyses
+    print("Plotting enhanced similarity matrices...")
+    plot_enhanced_similarity_matrices(
+        similarity_results, propagation_results, 
+        args.output_dir, args.model_name, args.num_files,
+        include_conditional=args.include_conditional,
+        use_gpu_info=True
     )
+    
+    # Keep backward compatibility with original plots
+    if not args.include_input_propagation:
+        print("Plotting traditional similarity matrices...")
+        plot_similarity_matrices(
+            similarity_results, args.output_dir, args.model_name, args.num_files,
+            include_conditional=args.include_conditional
+        )
     
     # Feature divergence analysis
     if args.include_divergence:
@@ -137,7 +187,12 @@ def run_similarity_analysis(layer_features, original_lengths, args):
             layer_features, args.output_dir, args.model_name, args.num_files
         )
     
-    return similarity_results
+    # Return combined results
+    results = {'layer_similarities': similarity_results}
+    if propagation_results:
+        results['input_propagation'] = propagation_results
+    
+    return results
 
 
 def run_conditional_analysis(layer_features, original_lengths, args):
@@ -202,6 +257,89 @@ def run_temporal_analysis(layer_features, original_lengths, args):
     return temporal_similarities
 
 
+def run_input_propagation_analysis(layer_features, original_lengths, args):
+    """Run input propagation analysis to track how original input correlates with each layer."""
+    print("\n=== Running Input Propagation Analysis ===")
+    
+    try:
+        # Use the new unified analyzer
+        from utils.math_utils import CorrelationAnalyzer
+        from utils.visualization_utils import (
+            create_analysis_summary_plot, 
+            create_correlation_plot, 
+            create_bar_plot, 
+            save_figure
+        )
+        
+        # Initialize analyzer
+        analyzer = CorrelationAnalyzer(
+            layer_features, 
+            original_lengths, 
+            cnn_layer='transformer_input', 
+            max_layer=11
+        )
+        
+        print(f"Analyzing input propagation through {analyzer.config['transformer_count']} transformer layers...")
+        
+        # Compute all analyses at once
+        results = analyzer.compute_all_analyses()
+        
+        layers = results['layer_order']
+        simple_corrs = [results['simple_correlations'][l] for l in layers]
+        partial_corrs = [results['progressive_partial_correlations'][l] for l in layers]
+        r2_values = [results['r_squared_values'][l] for l in layers]
+        
+        # Create comprehensive plot using utility function
+        fig = create_analysis_summary_plot(
+            simple_corrs, partial_corrs, r2_values, 
+            layers, args.model_name, args.num_files
+        )
+        save_figure(fig, f'{args.output_dir}/input_propagation_analysis_{args.model_name}_n{args.num_files}.png')
+        
+        # Create individual detailed plots using utility functions
+        
+        # Simple correlations plot
+        fig = create_bar_plot(
+            simple_corrs, layers,
+            f'Input Signal Retention Across Layers - {args.model_name}',
+            'Correlation with Original Input',
+            color='blue'
+        )
+        save_figure(fig, f'{args.output_dir}/simple_correlations_{args.model_name}_n{args.num_files}.png')
+        
+        # Partial correlations plot
+        fig = create_bar_plot(
+            partial_corrs, layers,
+            f'Progressive Partial Correlations - {args.model_name}',
+            'Partial Correlation with Input (Controlling for Previous Layers)',
+            color='orange'
+        )
+        save_figure(fig, f'{args.output_dir}/partial_correlations_{args.model_name}_n{args.num_files}.png')
+        
+        # Print summary to console
+        print("\n=== Input Propagation Summary ===")
+        print(f"Analysis of {results['cnn_layer']} → transformer layers:")
+        print("\nSimple Correlations (signal retention):")
+        for layer, corr in zip(layers, simple_corrs):
+            layer_num = layer.replace('transformer_layer_', 'L')
+            print(f"  {layer_num}: {corr:.3f}")
+        
+        print(f"\nSignal retention decay: {simple_corrs[0]:.3f} → {simple_corrs[-1]:.3f}")
+        
+        print("\nPartial Correlations (new information per layer):")
+        for layer, corr in zip(layers, partial_corrs):
+            layer_num = layer.replace('transformer_layer_', 'L')
+            print(f"  {layer_num}: {corr:.3f}")
+        
+        print(f"\nMean absolute partial correlation: {np.mean(np.abs(partial_corrs)):.3f}")
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in input propagation analysis: {e}")
+        return None
+
+
 def print_summary(layer_features, r2_scores, args):
     """Print a summary of the analysis results."""
     print("\n" + "="*60)
@@ -215,10 +353,10 @@ def print_summary(layer_features, r2_scores, args):
         print(f"Segment length: {args.segment_length}")
         print(f"Segment strategy: {args.segment_strategy}")
     
-    # Layer information
-    from utils.data_utils import filter_and_sort_layers
-    layers = filter_and_sort_layers(layer_features)
-    print(f"Layers analyzed: {len(layers)} ({layers[0]} to {layers[-1]})")
+    # Layer information using new utilities
+    from utils.data_utils import create_layer_analysis_config
+    config = create_layer_analysis_config(layer_features)
+    print(f"Layers analyzed: {config['layer_count']} ({config['all_layers'][0]} to {config['all_layers'][-1]})")
     
     # Feature dimensions
     total_params = sum(np.prod(features.shape) for features in layer_features.values())
@@ -226,9 +364,9 @@ def print_summary(layer_features, r2_scores, args):
     
     # CNN influence summary
     if r2_scores is not None:
-        cnn_layers = [l for l in layers if l != 'transformer_input']
+        transformer_layers = config['transformer_layer_names']
         print(f"\nCNN Influence (R² values):")
-        for layer, r2 in zip(cnn_layers, r2_scores):
+        for layer, r2 in zip(transformer_layers, r2_scores):
             independence = (1 - r2) * 100
             print(f"  {layer}: {r2:.3f} ({independence:.1f}% independent)")
         
@@ -278,6 +416,16 @@ def main():
                        help="Include conditional analysis (CNN influence)")
     parser.add_argument("--include_divergence", action='store_true',
                        help="Include feature divergence analysis")
+    parser.add_argument("--include_input_propagation", action='store_true',
+                       help="Include input propagation analysis (Simple, Progressive Partial, and R² correlations)")
+    
+    # Performance and parallelization options
+    parser.add_argument("--use_gpu", action='store_true', default=True,
+                       help="Use GPU acceleration for computations (default: True)")
+    parser.add_argument("--no_gpu", action='store_false', dest='use_gpu',
+                       help="Disable GPU acceleration (force CPU-only)")
+    parser.add_argument("--n_jobs", type=int, default=-1,
+                       help="Number of parallel CPU jobs (-1 for all cores, 1 to disable)")
     
     # Temporal analysis arguments
     parser.add_argument("--window_size", type=int, default=20,
@@ -322,6 +470,7 @@ def main():
     
     # Run analyses based on arguments
     r2_scores = None
+    propagation_results = None
     
     if not args.skip_basic:
         run_basic_analysis(layer_features, original_lengths, args)
@@ -331,6 +480,9 @@ def main():
     
     if args.include_conditional:
         r2_scores = run_conditional_analysis(layer_features, original_lengths, args)
+    
+    if args.include_input_propagation:
+        propagation_results = run_input_propagation_analysis(layer_features, original_lengths, args)
     
     if not args.skip_temporal:
         temporal_results = run_temporal_analysis(layer_features, original_lengths, args)
