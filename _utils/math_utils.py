@@ -1,8 +1,7 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional
 # import multiprocessing as mp
-from functools import partial
 
 try:
     from tqdm import tqdm
@@ -158,6 +157,7 @@ def _compute_cka_chunked_gpu(X_torch: torch.Tensor, Y_torch: torch.Tensor,
 
 def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
     """
+    TEST 4 (CPU)
     Compute CKA (Centered Kernel Alignment) between two representations.
     
     Args:
@@ -197,7 +197,7 @@ def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
 def compute_cka_without_padding(features1: np.ndarray, features2: np.ndarray, 
                                orig_lens1: List[int], orig_lens2: List[int]) -> float:
     """
-    Compute CKA excluding padded time steps.
+    Test 5 (CPU): Compute CKA excluding padded time steps.
     
     Args:
         features1, features2: Padded features (batch, time, dim)
@@ -235,7 +235,10 @@ def compute_cka_without_padding(features1: np.ndarray, features2: np.ndarray,
 
 def compute_partial_correlation_gpu(X: np.ndarray, Y: np.ndarray, Z: np.ndarray,
                                    device: str = 'cuda') -> float:
-    """GPU-accelerated partial correlation computation."""
+    """
+    TEST 0 (GPU)
+    GPU-accelerated partial correlation computation.
+    """
     if not TORCH_AVAILABLE:
         return compute_partial_correlation(X, Y, Z)
     
@@ -249,8 +252,8 @@ def compute_partial_correlation_gpu(X: np.ndarray, Y: np.ndarray, Z: np.ndarray,
         Y_residual = _regress_out_gpu(Z_torch, Y_torch)
         
         # Compute correlation between residuals
-        X_flat = X_residual.flatten()
-        Y_flat = Y_residual.flatten()
+        X_flat = X_residual.flatten() #TODO: Check if this is correct!
+        Y_flat = Y_residual.flatten() #TODO: Check if this is correct!
         
         correlation = torch.corrcoef(torch.stack([X_flat, Y_flat]))[0, 1]
         result = correlation.cpu().item()
@@ -267,7 +270,11 @@ def compute_partial_correlation_gpu(X: np.ndarray, Y: np.ndarray, Z: np.ndarray,
 
 def compute_partial_correlation_multi_gpu(X: np.ndarray, Y: np.ndarray, Z: np.ndarray,
                                         n_gpus: int = None) -> float:
-    """Multi-GPU accelerated partial correlation computation.""" #TODO: Check if this is working as expected! New function with multi-GPU parallelization hasn't been tested yet!
+    """ 
+    TEST 1 (multi-GPU) #TODO: May be removed in the future!
+    Multi-GPU accelerated partial correlation computation.
+    """ #TODO: Check if this is working as expected! New function with multi-GPU parallelization hasn't been tested yet!
+    
     if not TORCH_AVAILABLE:
         return compute_partial_correlation(X, Y, Z)
     
@@ -370,8 +377,8 @@ def compute_partial_correlation_multi_gpu(X: np.ndarray, Y: np.ndarray, Z: np.nd
         # Compute final correlation (on GPU 0)
         try:
             device = 'cuda:0'
-            X_flat = torch.tensor(X_residual.flatten(), device=device, dtype=torch.float32)
-            Y_flat = torch.tensor(Y_residual.flatten(), device=device, dtype=torch.float32)
+            X_flat = torch.tensor(X_residual.flatten(), device=device, dtype=torch.float32)     #TODO: Check if this is correct!
+            Y_flat = torch.tensor(Y_residual.flatten(), device=device, dtype=torch.float32)     #TODO: Check if this is correct!
             
             correlation = torch.corrcoef(torch.stack([X_flat, Y_flat]))[0, 1]
             result = correlation.cpu().item()
@@ -384,8 +391,8 @@ def compute_partial_correlation_multi_gpu(X: np.ndarray, Y: np.ndarray, Z: np.nd
             
         except Exception as e:
             # Final fallback to CPU correlation
-            X_flat = X_residual.flatten()
-            Y_flat = Y_residual.flatten()
+            X_flat = X_residual.flatten() #TODO: Check if this is correct!  
+            Y_flat = Y_residual.flatten() #TODO: Check if this is correct!  
             if len(X_flat) > 1 and len(Y_flat) > 1:
                 return np.corrcoef(X_flat, Y_flat)[0, 1]
             else:
@@ -417,6 +424,7 @@ def _regress_out_gpu(Z: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
 
 def compute_partial_correlation(X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> float:
     """
+    TEST 0 (CPU)
     Compute partial correlation between X and Y given Z.
     
     This computes the correlation between X and Y after removing the linear 
@@ -457,8 +465,8 @@ def compute_partial_correlation(X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> 
     
     # Compute correlation between residuals
     # Flatten residuals for correlation computation
-    residuals_X_flat = residuals_X.flatten()
-    residuals_Y_flat = residuals_Y.flatten()
+    residuals_X_flat = residuals_X.flatten() #TODO: Check if this is correct!
+    residuals_Y_flat = residuals_Y.flatten() #TODO: Check if this is correct!
     
     if len(residuals_X_flat) > 1 and len(residuals_Y_flat) > 1:
         partial_corr = np.corrcoef(residuals_X_flat, residuals_Y_flat)[0, 1]
@@ -478,8 +486,8 @@ def _compute_layer_correlation_worker(args):
     layer_batch = layer_features[:min_samples]
     
     # Flatten for correlation
-    input_flat = input_batch.flatten()
-    layer_flat = layer_batch.flatten()
+    input_flat = input_batch.flatten() #TODO: Check if this is correct!
+    layer_flat = layer_batch.flatten() #TODO: Check if this is correct!
     
     # Ensure same length for correlation #TODO: Check for edge cases and add warnings catch_warnings
     min_length = min(len(input_flat), len(layer_flat))
@@ -509,7 +517,7 @@ def _compute_layer_correlation_gpu_worker(args):
         
         # Move input features to GPU once
         input_tensor = torch.tensor(input_features, device=device, dtype=torch.float32)
-        input_flat = input_tensor.flatten()
+        input_flat = input_tensor.flatten() #TODO: Check if this is correct!
         
         for layer_name, layer_features in zip(layer_names, layer_features_list):
             try:
@@ -519,7 +527,7 @@ def _compute_layer_correlation_gpu_worker(args):
                 
                 # Move to GPU and flatten
                 layer_tensor = torch.tensor(layer_batch, device=device, dtype=torch.float32)
-                layer_flat = layer_tensor.flatten()
+                layer_flat = layer_tensor.flatten() #TODO: Check if this is correct!
                 
                 # Ensure same length
                 min_length = min(input_flat.shape[0], layer_flat.shape[0])
@@ -552,8 +560,8 @@ def _compute_layer_correlation_gpu_worker(args):
             input_batch = input_features[:min_samples]
             layer_batch = layer_features[:min_samples]
             
-            input_flat = input_batch.flatten()
-            layer_flat = layer_batch.flatten()
+            input_flat = input_batch.flatten()  #TODO: Check if this is correct!
+            layer_flat = layer_batch.flatten()  #TODO: Check if this is correct!
             
             min_length = min(len(input_flat), len(layer_flat))
             if min_length > 1:
@@ -576,13 +584,14 @@ def compute_input_layer_correlations(input_features: np.ndarray,
                                    use_gpu: bool = True,
                                    n_gpus: int = None) -> Dict[str, float]:
     """
-    TEST 1: Compute correlation between original input and each layer's output with multi-GPU parallelization.
+    TEST 1 (multi-GPU): Compute correlation between original input and each layer's output with multi-GPU parallelization.
+    TODO: Check if this is working as expected! New function with multi-GPU may not be needed or working as expected!
     
     This tracks how the original input signal correlates with representations
     as information propagates through the network layers. Useful for understanding
     information retention/transformation across layers.
     
-    Args:
+    Args
         input_features: (n_samples, n_input_features) - Original input features
         layer_features_dict: Dictionary mapping layer names to their features
         layer_order: Optional list specifying the order of layers for analysis
@@ -687,8 +696,8 @@ def compute_input_layer_correlations(input_features: np.ndarray,
             layer_batch = layer_features[:min_samples]
             
             # Flatten for correlation
-            input_flat = input_batch.flatten()
-            layer_flat = layer_batch.flatten()
+            input_flat = input_batch.flatten() #TODO: Check if this is correct!
+            layer_flat = layer_batch.flatten() #TODO: Check if this     is correct!
             
             # Ensure same length for correlation
             min_length = min(len(input_flat), len(layer_flat))
@@ -708,54 +717,6 @@ def compute_input_layer_correlations(input_features: np.ndarray,
     return correlations
 
 
-def _compute_partial_correlation_worker(args):
-    """Worker function for parallel partial correlation computation."""
-    (i, current_layer, input_features, layer_features_dict, layer_order) = args
-    
-    current_features = layer_features_dict[current_layer]
-    
-    # Ensure same number of samples
-    min_samples = min(input_features.shape[0], current_features.shape[0])
-    input_batch = input_features[:min_samples]
-    current_batch = current_features[:min_samples]
-    
-    # Reshape to 2D for regression
-    X = input_batch.reshape(-1, input_batch.shape[-1])  # Input
-    Y = current_batch.reshape(-1, current_batch.shape[-1])  # Current layer
-    
-    if i == 0:
-        # First layer: simple correlation
-        try:
-            correlation = np.corrcoef(X.flatten(), Y.flatten())[0, 1]
-            return (current_layer, correlation)
-        except:
-            return (current_layer, 0.0)
-    else:
-        # Later layers: partial correlation controlling for all previous layers
-        previous_layers = layer_order[:i]
-        
-        # Concatenate all previous layer features as conditioning variables
-        Z_list = []
-        for prev_layer in previous_layers:
-            prev_features = layer_features_dict[prev_layer][:min_samples]
-            Z_list.append(prev_features.reshape(-1, prev_features.shape[-1]))
-        
-        if Z_list:
-            Z = np.hstack(Z_list)  # Concatenate all previous layers
-            
-            # Ensure same number of samples
-            min_samples_all = min(X.shape[0], Y.shape[0], Z.shape[0])
-            X = X[:min_samples_all]
-            Y = Y[:min_samples_all]
-            Z = Z[:min_samples_all]
-            
-            try:
-                partial_corr = compute_partial_correlation(X, Y, Z)
-                return (current_layer, partial_corr)
-            except Exception as e:
-                return (current_layer, 0.0)
-        else:
-            return (current_layer, 0.0)
 
 
 def compute_progressive_partial_correlations(input_features: np.ndarray,
@@ -850,7 +811,7 @@ def compute_progressive_partial_correlations(input_features: np.ndarray,
         if i == 0:
             # First layer: simple correlation
             try:
-                correlation = np.corrcoef(X.flatten(), Y.flatten())[0, 1]
+                correlation = np.corrcoef(X.flatten(), Y.flatten())[0, 1] #TODO: Check if this is correct!
                 partial_correlations[current_layer] = correlation
             except:
                 partial_correlations[current_layer] = 0.0
@@ -1262,7 +1223,7 @@ class CorrelationAnalyzer:
             print(f"CorrelationAnalyzer: Using {self.n_jobs} parallel CPU jobs")
     
     def compute_simple_input_correlations(self, show_progress: bool = False, n_gpus: int = None) -> Dict[str, float]:
-        """Compute simple correlations between input and each transformer layer."""
+        """ TEST 1: Compute simple correlations between input and each transformer layer."""
         return compute_input_layer_correlations(
             self.config['cnn_features'], 
             self.config['transformer_layers'],
@@ -1392,9 +1353,9 @@ class CorrelationAnalyzer:
             'layer_order': self.config['transformer_layer_names'],
             'cnn_layer': self.cnn_layer,
             'interpretation': {
-                'simple_correlations': 'Direct correlation between input and each layer (signal retention)',
-                'progressive_partial_correlations': 'New correlation each layer adds beyond previous layers',
-                'r_squared_values': 'Fraction of input variance explained by each layer'
+                'simple_correlations (Test 1)': 'Direct correlation between input and each layer (signal retention)',
+                'progressive_partial_correlations (Test 2)': 'New correlation each layer adds beyond previous layers',
+                'r_squared_values (Test 3)': 'Fraction of input variance explained by each layer'
             },
             'performance_info': {
                 'gpu_acceleration': self.use_gpu,
