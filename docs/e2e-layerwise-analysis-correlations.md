@@ -229,7 +229,7 @@ max_time = features1.shape[0]     # Incorrect for temporal operations
 max_time_steps = features1.shape[1]  # Returns sequence length
 n_windows = (max_time_steps - window_size) // stride + 1
 
-# CORRECT: Window extraction from time dimension
+# CORRECT: Window extraction from time dimension (shape[1])
 for window_idx in range(n_windows):
     start_time = window_idx * stride
     end_time = start_time + window_size
@@ -352,18 +352,55 @@ This section documents the current status of all similarity metric functions in 
 6. **`compute_cka()`** - Regular CKA computation (CPU)
    - Location: `_utils/math_utils.py`
    - Purpose: Centered Kernel Alignment between two representations
+   - Implementation details:
+     - Pure NumPy implementation
+     - Single-threaded CPU computation
+     - Straightforward implementation with no memory optimizations
+     - Steps:
+       1. Centers the input matrices (X, Y)
+       2. Computes Gram matrices using matrix multiplication
+       3. Centers the Gram matrices using centering matrix H
+       4. Computes HSIC and normalization terms
+       5. Returns final CKA score
 
 7. **`compute_cka_gpu()`** - GPU-accelerated CKA
    - Location: `_utils/math_utils.py`
    - Purpose: GPU-optimized CKA computation
+   - Implementation details:
+     - PyTorch-based GPU implementation
+     - Falls back to CPU if GPU unavailable
+     - Memory-efficient option with chunked computation
+     - Handles large matrices through adaptive chunking
+     - Cleans up GPU memory after computation
 
 8. **`compute_cka_without_padding()`** - Padding-aware CKA
    - Location: `_utils/math_utils.py`
    - Purpose: CKA computation excluding padded timesteps
+   - Implementation details:
+     - Handles batched sequence data
+     - Respects original sequence lengths
+     - Filters out padded timesteps before computation
+     - Ensures valid sample alignment between sequences
 
 9. **`compute_cka_gpu_optimized()`** - Memory-optimized GPU CKA
    - Location: `gpu_layer_analysis.py`
    - Purpose: Memory-efficient GPU CKA with chunking
+   - Implementation details:
+     - Part of GPUParallelSimilarity class
+     - Adaptive chunk size based on input dimensions
+     - Handles 3D input tensors (batch, time, features)
+     - Includes CPU fallback for error cases
+     - Optimized for V100 GPUs
+     - Memory-efficient computation for large matrices
+
+
+
+
+
+
+
+
+   
 
 ##### Other
 10. **`compute_correlation_gpu()`** - GPU correlation
