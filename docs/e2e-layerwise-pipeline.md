@@ -353,12 +353,247 @@ source e2e-layerwise/bin/activate
 # All dependencies should already be installed in the environment
 ```
 
-## Contributing
+## Adding Future Contributions
+
+### Current Main Pipeline Files
+1. Feature Extraction
+File: main_extract_features_chunked.py (/home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/extract/main_extract_features_chunked.py)
+Purpose: Chunked HuBERT feature extraction script for large datasets
+
+2. Complete Analysis Pipeline
+File: main_layerwise_analysis.py
+Purpose: Primary analysis pipeline with multiple analysis types (similarity, temporal, conditional)
+
+3. GPU-Accelerated Layer Analysis
+File: main_gpu_analysis.py
+Purpose: GPU-accelerated similarity computation between layers
+
+4. GPU-Accelerated Temporal Analysis
+File: main_gpu_temporal_analysis.py
+Purpose: GPU-accelerated temporal dynamics analysis with sliding windows
+
+5. Example Runner/Demo
+File: main_layerwise_analysis_examples.py
+Purpose: Example script demonstrating various analysis patterns
+
+MAIN ENTRY POINTS:
+├── extract/
+│   └── main_extract_features_chunked.py     # 1. Extract features from audio
+├── main_layerwise_analysis.py               # 2. Primary analysis pipeline  
+├── main_gpu_analysis.py                     # 3. GPU similarity analysis
+├── main_gpu_temporal_analysis.py            # 4. GPU temporal analysis
+└── main_layerwise_analysis_examples.py      # 5. Usage examples
+
+SUPPORT MODULES:
+├── _utils/          # Utility functions
+├── _analysis/       # Analysis modules  
+└── tools/          # Setup/utility scripts
 
 When adding new features or analysis methods:
-1. Follow the existing project structure under `utils/`, `analysis/`, or `extract/`
+1. Follow the existing project structure under `_utils/`, `_analysis/`, or `extract/`
 2. Add appropriate debug configurations to `.vscode/launch.json`
 3. Include comprehensive error handling and logging
 4. Test both single and multi-GPU processing modes
 5. Update this documentation with new capabilities
-6. Ensure NPZ format compatibility for feature files 
+6. Ensure NPZ format compatibility for feature files
+
+----
+## Recent Project Restructuring (June 2025)
+
+The following changes have been implemented and committed (Note these names below were not changed in the refactoring. Actual names for main scripts are outlined in the MAIN ENTRY point -section above- ):
+
+#### **Project Structure Update (New)**
+```
+layerwise-analysis-cca-vis/
+├── _utils/                    # Reorganized utilities (underscore prefix)
+│   ├── __init__.py
+│   ├── data_utils.py          # Data loading & preprocessing (323 lines)
+│   ├── math_utils.py          # Mathematical computations (1,508 lines)
+│   └── visualization_utils.py # Plotting utilities (483 lines)
+├── _analysis/                 # Reorganized analysis modules
+│   ├── __init__.py
+│   ├── similarity_analysis.py # Layer similarity analysis (741 lines)
+│   └── temporal_analysis.py   # Temporal dynamics & animations (508 lines)
+├── _slurm/                    # Reorganized SLURM job scripts
+│   ├── extract_hubert_features.slurm (55 lines)
+│   └── run_visualize_features.slurm (31 lines)
+├── extract/
+├── gpu_layer_analysis.py      # Updated with new imports and metric consistency
+├── gpu_temporal_layer_analysis.py # Updated temporal analysis
+├── visualize_features_clean.py    # Major enhancement with GPU acceleration
+├── run_clean_analysis.py          # Enhanced with new analysis examples
+└── .vscode/launch.json            # Updated debugging configurations
+```
+
+#### **Commit History Summary (13 commits)**
+
+##### **Documentation Enhancement (Commit 1)**
+**Hash**: `28754ca`
+- **Changes**: 506 insertions, 2 deletions in markdown files
+- **Details**: Comprehensive update to `e2e-layerwise-analysis-correlations.md` with:
+  - Detailed mathematical explanations for three analysis approaches
+  - Temporal analysis implementation details and windowing logic
+  - Complete similarity metrics status documentation
+  - Multi-GPU support documentation with usage examples
+  - Performance considerations and fallback scenarios
+
+##### **Directory Structure Cleanup (Commit 2)**
+**Hash**: `02d6042`
+- **Changes**: 1,648 deletions (9 files)
+- **Details**: Removed old directory structure files:
+  - Deleted `analysis/`, `utils/`, and `slurm/` directories
+  - Prepared for reorganization with underscore-prefixed directories
+
+##### **New Utilities Package (_utils/) (Commits 3-6)**
+
+**Commit 3** - `_utils/__init__.py` (Hash: `c4071d0`)
+- Initialize new utils package structure
+
+**Commit 4** - `_utils/data_utils.py` (Hash: `b9aec95`)
+- 323 lines of dataset handling, feature extraction, and batching functions
+
+**Commit 5** - `_utils/math_utils.py` (Hash: `e4701b7`)
+- **1,508 lines** of comprehensive mathematical utilities
+- **ACTIVE metrics**: partial correlation (CPU/GPU), input-layer correlations, progressive partial correlations, robust CPU fallbacks
+- **DISABLED metrics**: conditional CKA (regression issues), layer-to-layer correlations (refactoring), cosine similarity (not significant)
+- Multi-GPU acceleration support with automatic fallbacks
+
+**Commit 6** - `_utils/visualization_utils.py` (Hash: `8ebb46f`)
+- 483 lines of heatmap generation, similarity matrix plotting, temporal animation creation
+
+##### **New Analysis Package (_analysis/) (Commits 7-9)**
+
+**Commit 7** - `_analysis/__init__.py` (Hash: `44db17c`)
+- Initialize new analysis package structure
+
+**Commit 8** - `_analysis/similarity_analysis.py` (Hash: `03510ee`)
+- **741 lines** of layer-to-layer similarity computation
+- Input propagation analysis and orchestration of correlation, CKA, and partial correlation metrics
+- Excludes commented functions: conditional_cka, cosine_similarity variants, layer_to_layer_correlations
+
+**Commit 9** - `_analysis/temporal_analysis.py` (Hash: `6d013f8`)
+- **508 lines** of sliding window similarity computation
+- **Padding-aware** temporal dynamics with corrected time steps dimension handling
+- Conditional temporal analysis controlling for CNN output
+- **ACTIVE metrics**: correlation, cka, partial_correlation
+- **DISABLED**: conditional_cka (regression issues), cosine similarity (refactoring)
+
+##### **SLURM Scripts Reorganization (Commit 10)**
+**Hash**: `c875b2b`
+- **Changes**: 85 insertions (2 files)
+- Reorganized SLURM job scripts in `_slurm/` directory
+
+##### **Core Analysis Updates (Commits 11-13)**
+
+**Commit 11** - `gpu_layer_analysis.py` (Hash: `14b0be5`)
+- **Changes**: 226 insertions, 160 deletions
+- Fixed import paths to use `_utils` and `_analysis` packages
+- Updated default metrics to consistent `['correlation', 'cka']` list
+- Fixed inconsistency between listed and implemented metrics
+
+**Commit 12** - `gpu_temporal_layer_analysis.py` (Hash: `5e0c6b7`)
+- **Changes**: 98 insertions, 54 deletions
+- Import path fixes and metric consistency updates
+
+**Commit 13** - `run_clean_analysis.py` (Hash: `a5439f0`)
+- **Changes**: 111 insertions, 13 deletions
+- Fixed absolute paths to relative paths
+- **Added 4 new analysis examples**:
+  - `example_input_propagation_analysis()` - GPU-accelerated input propagation
+  - `example_all_correlations()` - Full GPU + CPU parallel analysis
+  - `example_performance_benchmark()` - GPU vs CPU performance comparison
+  - `example_cpu_only_comparison()` - CPU-only processing
+- **New CLI flags**: `--use_gpu`, `--no_gpu`, `--include_input_propagation`, `--n_jobs`
+
+##### **Major Feature Enhancement (Commit 14)**
+
+**Commit 14** - `visualize_features_clean.py` (Hash: `5141f01`)
+- **Changes**: 228 insertions, 76 deletions
+- **MAJOR ENHANCEMENT** with comprehensive new features:
+  - **GPU acceleration support** with CUDA detection and memory reporting
+  - **Input propagation analysis** with `CorrelationAnalyzer`
+  - **Enhanced similarity analysis** with new correlation types
+  - **Performance monitoring** and progress reporting
+  - **New CLI flags**: `--use_gpu`, `--no_gpu`, `--include_input_propagation`, `--n_jobs`
+  - Refactored CNN influence analysis with better error handling
+  - Updated author information (Sandra Arcos Holzinger, June 7, 2025)
+
+##### **Configuration Update (Commit 15)**
+**Hash**: `937f82b`
+- **Changes**: 24 insertions, 50 deletions
+- Updated VS Code debug configuration for new project structure
+
+### **Key Improvements Achieved**
+
+#### **1. Similarity Metrics Consistency**
+- **Fixed inconsistency** between listed metrics and actual implementations
+- **Active metrics**: `['correlation', 'cka']` in all GPU analysis functions
+- **Documented status** of disabled metrics with reasons
+
+#### **2. Enhanced Mathematical Capabilities**
+- **Multi-GPU acceleration** for input-layer correlations and progressive partial correlations
+- **Robust fallback system**: GPU → Single GPU → CPU
+- **Three analysis types**: layer-to-layer, input-layer, progressive partial correlations
+- **Performance optimization** with parallel processing
+
+#### **3. Temporal Analysis Improvements**
+- **Padding-aware computation** with corrected dimension handling
+- **Temporal windowing** fixed to use time steps dimension correctly
+- **Conditional analysis** controlling for CNN output
+- **Animation support** for temporal evolution visualization
+
+#### **4. Development Experience**
+- **Organized code structure** with underscore-prefixed packages
+- **Enhanced debugging** configurations for new structure
+- **Better error handling** and performance monitoring
+- **Comprehensive documentation** with usage examples
+
+#### **5. Performance & Usability**
+- **GPU acceleration** with automatic CUDA detection
+- **CPU parallelization** with configurable job counts
+- **Progress reporting** and performance benchmarking
+- **Multiple analysis workflows** with example scripts
+
+### **Current Similarity Metrics Status**
+
+#### **ACTIVE & WORKING**
+1. **`correlation`** - Pearson correlation between layers
+2. **`cka`** - Centered Kernel Alignment with padding support
+3. **`partial_correlation`** - Partial correlation controlling for CNN output
+4. **`input_layer_correlations`** - Direct correlation between input and layers
+5. **`progressive_partial_correlations`** - Progressive partial correlations showing new information per layer
+6. **`r_squared`** - Variance explanation analysis
+
+#### **DISABLED/COMMENTED OUT**
+1. ~~`conditional_cka`~~ - CKA controlling for variables (regression step issues)
+2. ~~`cosine_similarity`~~ - Cosine similarity variants (not significant for analysis)
+3. ~~`layer_to_layer_correlations`~~ - Layer-to-layer analysis (refactoring in progress)
+
+### **Usage Examples with New Structure**
+
+#### **GPU-Accelerated Input Propagation Analysis**
+```bash
+python visualize_features_clean.py \
+    --features_dir ./output/hubert_complete/librispeech_dev-clean_sample1 \
+    --output_dir ./output/clean_analysis/input_propagation \
+    --model_name HuBERT_Input_Propagation \
+    --num_files 5 \
+    --include_input_propagation \
+    --use_gpu \
+    --n_jobs -1
+```
+
+#### **Performance Benchmark (GPU vs CPU)**
+```bash
+python run_clean_analysis.py  # Runs example_performance_benchmark()
+```
+
+#### **All Correlation Types Analysis**
+```bash
+python visualize_features_clean.py \
+    --features_dir ./output/hubert_complete/librispeech_dev-clean_sample1 \
+    --output_dir ./output/clean_analysis/all_correlations \
+    --include_conditional \
+    --include_input_propagation \
+    --use_gpu
+```
