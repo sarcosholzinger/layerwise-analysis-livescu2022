@@ -105,7 +105,6 @@ Sample of processed files (total: 1,655):
 8842_304647_8842-304647-0013
 ```
 
-
 ----
 ## Feature Extraction Pipeline
 
