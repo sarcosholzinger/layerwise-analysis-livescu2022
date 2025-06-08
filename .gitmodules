@@ -1,3 +1,18 @@
 [submodule "tasks/word-benchmarks"]
   path = tasks/word-benchmarks
   url = git://https://github.com/vecto-ai/word-benchmarks
+[submodule "codes"]
+	path = codes
+	url = git@github.com:ankitapasad/layerwise-analysis.git
+[submodule "examples"]
+	path = examples
+	url = git@github.com:ankitapasad/layerwise-analysis.git
+[submodule "modellib_addons"]
+	path = modellib_addons
+	url = git@github.com:ankitapasad/layerwise-analysis.git
+[submodule "scripts"]
+	path = scripts
+	url = git@github.com:ankitapasad/layerwise-analysis.git
+[submodule "fig"]
+	path = fig
+	url = git@github.com:ankitapasad/layerwise-analysis.git
