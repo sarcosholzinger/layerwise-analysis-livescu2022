@@ -13,14 +13,14 @@ from scipy.stats import spearmanr, pearsonr
 import time
 from tqdm import tqdm
 
-import tools
+import scripts.codes.tools.tools as tools
 
 curr_dir = os.path.dirname(os.path.realpath(__file__))
 import sys
 
 sys.path.insert(0, os.path.join(curr_dir, ".."))
-from utils import save_dct, read_lst, format_time, load_dct, add_to_file
-from tools_utils import LAYER_CNT
+from scripts.codes.utils import save_dct, read_lst, format_time, load_dct, add_to_file
+from scripts.codes.tools.tools_utils import LAYER_CNT
 
 
 class getCCA:

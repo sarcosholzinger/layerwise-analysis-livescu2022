@@ -33,7 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.join(curr_dir, ".."))
 import utils
-from cca_core import CCA
+from scripts.codes.tools.cca_core import CCA
 
 
 def logger(write_str, log_fn):
