@@ -8,7 +8,7 @@ from pathlib import Path
 from _utils.data_utils import filter_and_sort_layers
 from _utils.math_utils import (
     compute_cka, compute_cka_without_padding, compute_cka_gpu,
-    compute_partial_correlation, compute_partial_correlation_gpu,
+    compute_partial_correlation, #compute_partial_correlation_gpu,
     # compute_conditional_cka,  # Commented out due to regression step issues
     # compute_cosine_similarity, compute_cosine_similarity_gpu,  # Commented out as these functions are being refactored
     # NEW: Import the enhanced correlation analyses
@@ -296,7 +296,7 @@ def compute_input_propagation_similarities(layer_features: Dict[str, np.ndarray]
             original_lengths=original_lengths,
             cnn_layer=cnn_layer,
             max_layer=11,
-            use_gpu=use_gpu,
+            use_gpu=False,  # Force CPU to avoid GPU multiprocessing issues
             n_jobs=n_jobs
         )
         
@@ -304,7 +304,7 @@ def compute_input_propagation_similarities(layer_features: Dict[str, np.ndarray]
         results = analyzer.compute_all_analyses(show_progress=show_progress)
         
         print(f" Input propagation analysis completed")
-        print(f" Performance info: {results.get('performance_info', {})}")
+        print(f" Performance info: {results.get('performance_info', {})}") #TODO: This may not be needed as we're defaulting to CPU
         
         return results
         
@@ -336,6 +336,7 @@ def plot_input_propagation_correlations(propagation_results: Dict[str, Dict[str,
                                        show_performance_info: bool = True):
     """
     NEW: Plot the three types of input propagation correlations.
+    Saves the plot as file name: input_propagation_analysis_{model_name}_n{num_files}.png in the output directory.
     
     Creates visualizations for:
     1. Simple Input-Layer Correlations (signal retention)
@@ -374,7 +375,7 @@ def plot_input_propagation_correlations(propagation_results: Dict[str, Dict[str,
     
     # Plot 1: Simple Input-Layer Correlations
     axes[0, 0].plot(layer_numbers, simple_values, 'o-', linewidth=2, markersize=8, color='blue')
-    axes[0, 0].set_title('Simple Input-Layer Correlations\n(Signal Retention)', fontsize=14, fontweight='bold')
+    axes[0, 0].set_title('Simple Input-Layer Correlations\n(Signal Retention) - Test 1', fontsize=14, fontweight='bold')
     axes[0, 0].set_xlabel('Transformer Layer')
     axes[0, 0].set_ylabel('Correlation with Input')
     axes[0, 0].grid(True, alpha=0.3)
@@ -387,7 +388,7 @@ def plot_input_propagation_correlations(propagation_results: Dict[str, Dict[str,
     
     # Plot 2: Progressive Partial Correlations
     axes[0, 1].plot(layer_numbers, partial_values, 'o-', linewidth=2, markersize=8, color='orange')
-    axes[0, 1].set_title('Progressive Partial Correlations\n(New Information per Layer)', fontsize=14, fontweight='bold')
+    axes[0, 1].set_title('Progressive Partial Correlations\n(New Information per Layer) - Test 2', fontsize=14, fontweight='bold')
     axes[0, 1].set_xlabel('Transformer Layer')
     axes[0, 1].set_ylabel('Partial Correlation')
     axes[0, 1].grid(True, alpha=0.3)
@@ -400,7 +401,7 @@ def plot_input_propagation_correlations(propagation_results: Dict[str, Dict[str,
     
     # Plot 3: R² Analysis
     axes[1, 0].plot(layer_numbers, r2_vals, 'o-', linewidth=2, markersize=8, color='green')
-    axes[1, 0].set_title('R² Analysis\n(Variance Explained by Each Layer)', fontsize=14, fontweight='bold')
+    axes[1, 0].set_title('R² Analysis\n(Variance Explained by Each Layer) - Test 3', fontsize=14, fontweight='bold')
     axes[1, 0].set_xlabel('Transformer Layer')
     axes[1, 0].set_ylabel('R² (Variance Explained)')
     axes[1, 0].grid(True, alpha=0.3)
@@ -427,7 +428,7 @@ def plot_input_propagation_correlations(propagation_results: Dict[str, Dict[str,
                 fontsize=16, fontweight='bold', y=0.98)
     
     # Add performance information if available
-    if show_performance_info and 'performance_info' in propagation_results:
+    if show_performance_info and 'performance_info' in propagation_results: #TODO: Review which part of this code is needed
         perf_info = propagation_results['performance_info']
         info_text = f"GPU: {perf_info.get('gpu_acceleration', False)}, "
         info_text += f"Jobs: {perf_info.get('parallel_jobs', 1)}, "
@@ -452,6 +453,7 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
                                      include_conditional_cka: bool = False):
     """
     Enhanced plotting function that combines layer-to-layer similarities with input propagation analyses.
+    Saves the plot as file name: layer_similarity_analysis_{model_name}_n{num_files}.png in the output directory[].
     
     Args:
         similarity_results: Results from compute_layer_similarities  
@@ -492,10 +494,13 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
             axes[0, 2].set_title('Layer-to-Layer Cosine Similarity', fontsize=14)
         # Otherwise plot input propagation analysis
         elif propagation_results:
-            simple_corrs = [propagation_results['simple_correlations'][l] for l in layers]
-            axes[0, 2].plot(range(len(layers)), simple_corrs, 'o-', color='blue')
-            axes[0, 2].set_xticks(range(len(layers)))
-            axes[0, 2].set_xticklabels(layers, rotation=45)
+            # Only use transformer layers, not transformer_input, since simple_correlations
+            # contains correlations between transformer_input and each transformer layer
+            transformer_layers = [l for l in layers if l.startswith('transformer_layer_')]
+            simple_corrs = [propagation_results['simple_correlations'][l] for l in transformer_layers]
+            axes[0, 2].plot(range(len(transformer_layers)), simple_corrs, 'o-', color='blue')
+            axes[0, 2].set_xticks(range(len(transformer_layers)))
+            axes[0, 2].set_xticklabels(transformer_layers, rotation=45)
             axes[0, 2].set_title('Input Signal Retention', fontsize=14)
             axes[0, 2].set_ylabel('Correlation with Input')
             axes[0, 2].grid(True, alpha=0.3)
@@ -516,10 +521,12 @@ def plot_enhanced_similarity_matrices(similarity_results: Dict[str, np.ndarray],
             axes[1, 1].set_title('Conditional CKA\n(CNN Influence Removed)', fontsize=14)
         # Otherwise plot progressive partial correlations
         elif propagation_results:
-            partial_corrs = [propagation_results['progressive_partial_correlations'][l] for l in layers]
-            axes[1, 1].plot(range(len(layers)), partial_corrs, 'o-', color='orange')
-            axes[1, 1].set_xticks(range(len(layers)))
-            axes[1, 1].set_xticklabels(layers, rotation=45)
+            # Only use transformer layers for progressive partial correlations
+            transformer_layers = [l for l in layers if l.startswith('transformer_layer_')]
+            partial_corrs = [propagation_results['progressive_partial_correlations'][l] for l in transformer_layers]
+            axes[1, 1].plot(range(len(transformer_layers)), partial_corrs, 'o-', color='orange')
+            axes[1, 1].set_xticks(range(len(transformer_layers)))
+            axes[1, 1].set_xticklabels(transformer_layers, rotation=45)
             axes[1, 1].set_title('New Information per Layer', fontsize=14)
             axes[1, 1].set_ylabel('Partial Correlation')
             axes[1, 1].grid(True, alpha=0.3)
