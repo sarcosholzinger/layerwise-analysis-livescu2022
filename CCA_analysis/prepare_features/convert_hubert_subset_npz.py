@@ -87,5 +87,5 @@ if __name__ == "__main__":
     convert_npz_to_npy_subset(
         input_dir=input_dir,
         output_dir=output_dir,
-        num_files=10  # Process only 5 files
+        num_files=30  # Process only 5 files
     ) 
