@@ -1,9 +1,16 @@
+module load cuda/toolkit/12.8.1-1 
+module load cudnn/9.1.1.17_cuda12 
+
 #slurm allocate interactive session
 salloc -p gpu --mem 4G -c 2 --gres=gpu:v100:1 -t 01:00:00
 salloc -p gpu --nodelist=rack7n06 --mem 4G -c 2 --gres=gpu:v100:1 -t 01:00:00
+salloc -p gpu --nodelist=rack7n06 --mem 32G -c 4 --gres=gpu:v100:2 -t 04:00:00
+nvidia-smi
+swatch -n 3 nvidia-smi
 
 # Debugpy for layerwise analysis scripts
 python -m debugpy --listen 0.0.0.0:5678 main_layerwise_analysis.py 
+
 /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/test_input_propagation.py
 /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/e2e-layerwise/bin/python -m debugpy --listen 0.0.0.0:5678 --wait-for-client /home/hltcoe/sholzinger/phd/git/layerwise-analysis-cca-vis/run_clean_analysis.py
 
