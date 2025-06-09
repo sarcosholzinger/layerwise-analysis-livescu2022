@@ -797,6 +797,8 @@ def compute_progressive_partial_correlations(input_features: np.ndarray,
         layer_iter = enumerate(layer_order)
     
     for i, current_layer in layer_iter:
+        if show_progress:
+            print(f"Processing layer {i}: {current_layer}")
         current_features = layer_features_dict[current_layer]
         
         # Ensure same number of samples
@@ -817,7 +819,7 @@ def compute_progressive_partial_correlations(input_features: np.ndarray,
                 partial_correlations[current_layer] = 0.0
         else:
             # Later layers: partial correlation controlling for all previous layers
-            previous_layers = layer_order[:i]
+            previous_layers = [l for l in layer_order[:i] if l.startswith('transformer_layer_')]
             
             # Update progress description if showing progress
             if show_progress:
@@ -1238,6 +1240,7 @@ class CorrelationAnalyzer:
         return compute_progressive_partial_correlations(
             self.config['cnn_features'],
             self.config['transformer_layers'],
+            layer_order=self.config['transformer_layer_names'],  # Pass the layer order explicitly
             show_progress=show_progress,
             n_jobs=1,  # Sequential due to dependencies
             use_gpu=self.use_gpu,
@@ -1357,7 +1360,7 @@ class CorrelationAnalyzer:
                 'progressive_partial_correlations (Test 2)': 'New correlation each layer adds beyond previous layers',
                 'r_squared_values (Test 3)': 'Fraction of input variance explained by each layer'
             },
-            'performance_info': {
+            'performance_info': { #TODO: This may not be needed as we're defaulting to CPU
                 'gpu_acceleration': self.use_gpu,
                 'device': self.device,
                 'parallel_jobs': self.n_jobs,
