@@ -122,6 +122,50 @@ Individual Layer Files (NPY)
 CCA Analysis Ready
 ```
 
+### NPZ and NPY File Structures
+
+#### Original NPZ File Structure
+- **Format**: Compressed NumPy archive containing multiple arrays
+- **Keys**: 
+  - `transformer_layer_0` through `transformer_layer_11` for transformer layers
+  - Additional keys for convolutional layers and intermediate representations
+- **Shape**: `(1, time_steps, 768)` for each transformer layer where:
+  - `1`: Batch dimension
+  - `time_steps`: Number of frames (varies per file)
+  - `768`: Feature dimension (HuBERT hidden size)
+
+#### Converted NPY File Structure
+- **Format**: Individual NumPy array files per layer, with separate files for features and speaker IDs -- this was added so that we could track specific users for analysis
+- **Naming**:
+  - Features: `layer_{n}.npy` where n is the layer number
+  - Speaker IDs: `layer_{n}_speaker_ids.npy` where n is the layer number
+- **Shapes**:
+  - Features: `(total_frames, 768)` where:
+    - `total_frames`: Concatenated time steps from all processed files
+    - `768`: Feature dimension (preserved from NPZ)
+  - Speaker IDs: `(total_frames,)` where:
+    - `total_frames`: Matches the number of frames in the corresponding features file
+    - Each element is the speaker ID for that frame
+
+#### Conversion Process
+1. **Loading**: Each NPZ file is loaded and processed
+2. **Batch Removal**: Batch dimension is removed from features (shape becomes `(time_steps, 768)`)
+3. **Speaker ID Extraction**: Speaker ID is extracted from filename and repeated for each frame
+4. **Concatenation**: 
+   - Features from all files are concatenated along the time dimension
+   - Speaker IDs are concatenated to match the feature frames
+5. **Storage**: 
+   - Features are saved in `layer_{n}.npy`
+   - Speaker IDs are saved in `layer_{n}_speaker_ids.npy`
+   - Both files maintain the same order of frames
+
+#### CCA Analysis Requirements
+- CCA core expects input in format `(num_neurons, data_points)`
+- Data is transposed before CCA computation:
+  - From: `(total_frames, 768)`
+  - To: `(768, total_frames)`
+- This matches the expected format for neural representation analysis
+
 ### Expected Directory Structure for CCA
 
 The CCA implementation expects a specific directory structure:
