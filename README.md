@@ -1,3 +1,6 @@
+Note -- SAH -- I'm using this repo to track changes to submodules that are being used in my layer-wise analysis repo as part of my PhD. 
+This other repo lives at: https://github.com/FicusHub/layerwise-analysis-cca-vis/tree/master
+
 This codebase puts together tools and experiments to analyze self-supervised speech representations. These analysis techniques can be used to replicate the findings presented in 
 1. [Layer-Wise analysis of a self-supervised speech representation model](https://arxiv.org/abs/2107.04734)
 2. [Comparative layer-wise analysis of self-supervised speech models](https://arxiv.org/abs/2211.03929)
