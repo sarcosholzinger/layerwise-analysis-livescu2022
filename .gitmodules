@@ -10,9 +10,6 @@
 [submodule "modellib_addons"]
 	path = modellib_addons
 	url = git@github.com:ankitapasad/layerwise-analysis.git
-[submodule "scripts"]
-	path = scripts
-	url = git@github.com:ankitapasad/layerwise-analysis.git
 [submodule "fig"]
 	path = fig
 	url = git@github.com:ankitapasad/layerwise-analysis.git
