@@ -5,27 +5,16 @@ import sys
 import json
 import glob
 import numpy as np
-from functools import wraps
 
 # Add the codes directory to Python path
-codes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'codes'))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+codes_dir = os.path.join(root_dir, 'codes', 'codes')
 sys.path.append(codes_dir)
 
 # Now import the CCA module
-from codes.tools.get_scores import evaluate_cca
-from codes.tools.tools_utils import LAYER_CNT
-
-# Store the original np.load function
-original_np_load = np.load
-
-# Create a wrapper function that adds allow_pickle=True
-@wraps(original_np_load)
-def np_load_wrapper(*args, **kwargs):
-    kwargs['allow_pickle'] = True
-    return original_np_load(*args, **kwargs)
-
-# Replace np.load with our wrapper
-np.load = np_load_wrapper
+from tools.get_scores import evaluate_cca
+from tools.tools_utils import LAYER_CNT
 
 def detect_model_type(rep_dir):
     """
@@ -52,7 +41,7 @@ def detect_model_type(rep_dir):
     if not layer_files:
         raise ValueError(f"No layer files found in {ctx_dir}")
     
-    # Extract layer numbers and find the maximum
+    # Extract layer numbers and find the maximum -- this is based on the assumption that files names correspond to the layers numbers   
     layer_nums = []
     for f in layer_files:
         try:
@@ -65,7 +54,7 @@ def detect_model_type(rep_dir):
         raise ValueError("Could not parse layer numbers from files")
     
     max_layer = max(layer_nums)
-    print(f"Detected {max_layer + 1} transformer layers (layers 0-{max_layer})")
+    print(f"Detected {max_layer + 1} transformer layers (layers 0-{max_layer}) - based on file names at {rep_dir}")
     
     # Try to infer model type from directory name and layer count
     rep_dir_lower = rep_dir.lower()
@@ -113,7 +102,7 @@ def run_cca_analysis(
     model_name=None,  # Will be auto-detected if None
     save_fn="cca_results/cca_scores.json",
     base_layer=0,
-    mean_score=True,
+    mean_score=False,
     eval_single_layer=False,
     layer_num=-1
 ):
@@ -204,8 +193,9 @@ def run_cca_analysis(
     return scores
 
 if __name__ == "__main__":
+    codes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'codes'))
     # Example usage - model type will be auto-detected
     run_cca_analysis(
         rep_dir="CCA_analysis/prepare_features/converted_features/hubert_subset",
-        save_fn="CCA_analysis/cca_results/cca_scores.json"
+        save_fn="CCA_analysis/cca_results/cca_scores.json",
     ) 
